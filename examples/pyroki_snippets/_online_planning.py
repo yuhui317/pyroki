@@ -1,3 +1,5 @@
+# 学习导读：联合优化短关节轨迹和末端 SE(3) 轨迹，用上轮结果初始化，兼顾终点、平滑与碰撞软项。
+# 当前示例采用加权软惩罚以减少外循环成本，并非所有安全条件都作为硬约束。
 from typing import Sequence
 
 import jax
@@ -9,6 +11,7 @@ import numpy as onp
 import pyroki as pk
 
 
+# 在轨迹前保留一个起始配置位置，扩展上轮初值后求解，输出时移除起始行。
 def solve_online_planning(
     robot: pk.Robot,
     robot_coll: pk.collision.RobotCollision,
@@ -32,6 +35,7 @@ def solve_online_planning(
     target_links = jnp.array(target_link_indices)
 
     # Warm start: use previous solution shifted by one step.
+    # 增加一个内部起点变量；外部返回轨迹去掉第一行，仍是请求的 timesteps 长度。
     timesteps = timesteps + 1  # for start pose cost.
 
     sol_traj, sol_pos, sol_wxyz = _solve_online_planning_jax(
@@ -43,6 +47,7 @@ def solve_online_planning(
         timesteps,
         dt,
         jnp.array(start_cfg),
+        # 代码在末尾复制上一轨迹最后一行作扩展，没有在此显式删掉上一轨迹首行。
         jnp.concatenate([prev_sols, prev_sols[-1:]], axis=0),
     )
     sol_traj = sol_traj[1:]
@@ -52,6 +57,7 @@ def solve_online_planning(
     return onp.array(sol_traj), onp.array(sol_pos), onp.array(sol_wxyz)
 
 
+# 联合优化各时间步关节与末端位姿，以软项连接 FK/目标/平滑/速度/碰撞。
 @jdc.jit
 def _solve_online_planning_jax(
     robot: pk.Robot,
@@ -66,6 +72,7 @@ def _solve_online_planning_jax(
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     num_targets = len(target_links)
 
+    # 对单个时间步内的多个 SE(3) 目标逐个作流形右加更新，切空间先重排为 [N_target,6]。
     def batched_rplus(
         pose: jaxlie.SE3,
         delta: jax.Array,
@@ -74,6 +81,7 @@ def _solve_online_planning_jax(
 
     # Custom SE3 variable to batch across multiple joint targets.
     # This is not to be confused with SE3Vars with ids, which we use here for timesteps.
+    # 一个变量值包含 N_target 个 SE(3)，而变量 ID 的批轴表示时间，两种批含义不同。
     class BatchedSE3Var(  # pylint: disable=missing-class-docstring
         jaxls.Var[jaxlie.SE3],
         default_factory=lambda: jaxlie.SE3.identity((num_targets,)),
@@ -82,6 +90,7 @@ def _solve_online_planning_jax(
     ): ...
 
     # --- Define Variables ---
+    # 时间 ID=0..T−1 是不同关节状态；prev/next ID 切片构造相邻平滑/速度因子。
     traj_var = robot.joint_var_cls(jnp.arange(0, timesteps))
     traj_var_prev = robot.joint_var_cls(jnp.arange(0, timesteps - 1))
     traj_var_next = robot.joint_var_cls(jnp.arange(1, timesteps))
@@ -96,6 +105,7 @@ def _solve_online_planning_jax(
     # --- Define Costs ---
     factors: list[jaxls.Cost] = []  # Changed type hint to jaxls.Cost
 
+    # 用 FK 将关节轨迹和自由末端位姿变量绑定，残差为两者相对 SE(3) 的 log。
     @jaxls.Cost.factory(name="SE3PoseMatchJointCost")
     def match_joint_to_pose_cost(
         vals: jaxls.VarValues,
@@ -110,6 +120,7 @@ def _solve_online_planning_jax(
         ).log()
         return residual.flatten() * 100.0
 
+    # 正则相邻末端位姿的 SE(3) 切空间差，不按 dt 换算速度。
     @jaxls.Cost.factory(name="SE3SmoothnessCost")
     def pose_smoothness_cost(
         vals: jaxls.VarValues,
@@ -118,6 +129,7 @@ def _solve_online_planning_jax(
     ):
         return (vals[pose_var].inverse() @ vals[pose_var_prev]).log().flatten() * 1.0
 
+    # 让末端轨迹最后一步接近固定目标，平移/旋转分别使用 50/20 残差权重。
     @jaxls.Cost.factory(name="SE3PoseMatchCost")
     def pose_match_cost(
         vals: jaxls.VarValues,
@@ -128,6 +140,7 @@ def _solve_online_planning_jax(
             * jnp.array([50.0] * 3 + [20.0] * 3)
         ).flatten()
 
+    # 以 100 倍软残差让第一关节配置接近 start_cfg，不是等式约束。
     @jaxls.Cost.factory(name="MatchStartPoseCost")
     def match_start_pose_cost(
         vals: jaxls.VarValues,
@@ -211,6 +224,7 @@ def _solve_online_planning_jax(
         ]
     )
 
+    # 统一交给 LeastSquaresProblem 分析并求解，数值收敛和设备执行均不由本次注释任务验证。
     solution = (
         jaxls.LeastSquaresProblem(factors, [traj_var, pose_var])
         .analyze()
@@ -219,6 +233,7 @@ def _solve_online_planning_jax(
             initial_vals=jaxls.VarValues.make(
                 (traj_var.with_value(prev_sols), pose_var.with_value(init_pose_vals))
             ),
+            # 单次在线求解最多 20 次迭代；有限迭代软代价不能保证所有约束完全满足。
             termination=jaxls.TerminationConfig(max_iterations=20),
         )
     )

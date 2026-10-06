@@ -1,6 +1,7 @@
 """
 Solves the basic IK problem.
 """
+# 学习导读：让多个目标位姿共享同一个 JointVar(0)；批目标是多代价约束，不是多套独立关节解。
 
 from typing import Sequence
 
@@ -13,6 +14,7 @@ import numpy as onp
 import pyroki as pk
 
 
+# 接收 [N_target,3] 位置和 [N_target,4] 姿态，名称映射后求共同关节解。
 def solve_ik_with_multiple_targets(
     robot: pk.Robot,
     target_link_names: Sequence[str],
@@ -47,6 +49,7 @@ def solve_ik_with_multiple_targets(
     return onp.array(cfg)
 
 
+# 多个目标复用变量 ID=0，批化位姿代价共同约束同一配置，再加 rest 与限位。
 @jdc.jit
 def _solve_ik_jax(
     robot: pk.Robot,
@@ -63,9 +66,12 @@ def _solve_ik_jax(
     )
     batch_axes = target_pose.get_batch_axes()
 
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_analytic_jac(
+            # 给机器人数值叶节点加长度 1 批轴以对齐目标批；静态拓扑不会被数组化。
             jax.tree.map(lambda x: x[None], robot),
+            # 目标批中的 ID 全为 0，所以每个目标代价引用同一关节变量，而不是各自独立解。
             JointVar(jnp.full(batch_axes, 0)),
             target_pose,
             target_joint_indices,

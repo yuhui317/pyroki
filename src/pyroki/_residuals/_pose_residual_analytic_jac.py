@@ -7,6 +7,8 @@ Note: This uses a custom Jacobian pattern that doesn't fit the simple
 Cost.create_factory(residual_fn) pattern, so it's kept as a specialized
 cost factory rather than a pure residual function.
 """
+# 学习导读：位姿残差的解析雅可比路径，利用缓存 FK、关节祖先路径和 SE(3) jlog 构造 6×N 雅可比。
+# 模仿关节的导数按 multiplier 缩放并累加到被驱动关节列；joint_mask 用于屏蔽雅可比列。
 
 from functools import partial
 
@@ -18,6 +20,7 @@ import jaxls
 from .._robot import Robot
 
 
+# 从目标关节向根遍历，标出影响目标的关节及对应直接驱动列，其余填 -1。
 def _get_actuated_joints_applied_to_target(
     robot: Robot,
     target_joint_idx: jax.Array,
@@ -35,6 +38,7 @@ def _get_actuated_joints_applied_to_target(
 
     assert target_joint_idx.shape == ()
 
+    # 读取当前关节的直接驱动或 mimic 索引，写入路径表后继续到父关节。
     def body_fun(joint_idx, indices):
         # Find the corresponding active actuated joint.
         actuated_indices = jnp.array(robot.joints.actuated_indices, dtype=jnp.int32)
@@ -74,6 +78,7 @@ def _get_actuated_joints_applied_to_target(
 _PoseCostJacCache = tuple[jax.Array, jax.Array, jaxlie.SE3]
 
 
+# 准备可广播的目标/变量/机器人批轴，预先求祖先关节映射，再构造带缓存的解析代价。
 def pose_cost_analytic_jac(
     robot: Robot,
     joint_var: jaxls.Var[jax.Array],
@@ -154,6 +159,7 @@ def pose_cost_analytic_jac(
 
 # It's nice to pass arguments in explicitly instead of via closure in the
 # `pose_cost_analytic_jac` wrapper. It helps jaxls vectorize repeated costs.
+# 用缓存世界位姿计算线/角速度，转换到末端坐标并乘误差 jlog，得到加权 6×N_act 雅可比。
 def _pose_cost_jac(
     vals: jaxls.VarValues,
     jac_cache: _PoseCostJacCache,
@@ -176,6 +182,7 @@ def _pose_cost_jac(
     R_ee_world = T_world_ee.rotation().inverse()
 
     # Get joint twists; these are scaled for mimic joints.
+    # mimic multiplier 缩放导数；offset 已体现在缓存的 FK 位姿，不额外加在导数上。
     joint_twists = robot.joints.twists * robot.joints.mimic_multiplier[..., None]
 
     # Get angular velocity components (omega).
@@ -188,6 +195,7 @@ def _pose_cost_jac(
     vel_wrt_world = Ts_world_joint.rotation() @ vel_local
 
     # Compute the linear velocity component (v = ω × r + v_joint).
+    # 旋转关节线速度为 ω×(p_ee−p_joint)，再加移动关节自身线速度。
     vel_wrt_world = (
         jnp.cross(
             omega_wrt_world,
@@ -209,6 +217,7 @@ def _pose_cost_jac(
         ),
         0.0,
     ).T
+    # 几何速度 Jacobian 经误差 log 的导数转换为当前残差 Jacobian。
     jac = pose_error.jlog() @ jac
 
     # Jacobian of all joints => Jacobian of actuated joints.
@@ -222,13 +231,16 @@ def _pose_cost_jac(
     )
 
     # Apply joint mask: zero out Jacobian columns for locked joints.
+    # mask=0 只让本位姿因子的该列导数为零；其它因子仍可能影响对应关节。
     jac = jac * joint_mask
 
     # Apply weights
+    # 平移三行与旋转三行分别乘残差权重，和缓存残差使用同样权重。
     weights = jnp.array([pos_weight] * 3 + [ori_weight] * 3)
     return jac * weights[:, None]
 
 
+# 计算 log(target⁻¹·actual) 位姿残差，同时缓存关节 FK、连杆 FK 与误差供解析导数复用。
 @jaxls.Cost.factory(jac_custom_with_cache_fn=_pose_cost_jac)
 def _pose_cost_analytical_jac(
     vals: jaxls.VarValues,

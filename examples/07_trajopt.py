@@ -4,6 +4,7 @@ Basic Trajectory Optimization using PyRoKi.
 
 Robot going over a wall, while avoiding world-collisions.
 """
+# 学习导读：选择 Panda/UR5，优化跨越墙体的整段关节轨迹，随后用时间滑块播放；并未连接机器人控制。
 
 import json
 import time
@@ -21,6 +22,7 @@ from robot_descriptions.loaders.yourdfpy import load_robot_description
 import pyroki_snippets as pks
 
 
+# 为机器人设置起止目标和墙障碍，离线求轨迹后用滑块/自动循环播放。
 def main(robot_name: Literal["ur5", "panda"] = "panda"):
     if robot_name == "ur5":
         urdf = load_robot_description("ur5_description")
@@ -39,6 +41,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
         target_link_name = "panda_hand"
         down_wxyz = np.array([0, 0, 1, 0])  # for panda!
         sphere_json_path = Path(__file__).parent / "assets" / "panda_spheres.json"
+        # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
         robot = pk.Robot.from_urdf(urdf)
 
     else:
@@ -87,6 +90,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
     traj = np.array(traj)
 
     # Visualize!
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     urdf_vis = ViserUrdf(server, urdf)
     server.scene.add_grid("/grid", width=2, height=2, cell_size=0.1)
@@ -113,6 +117,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
     )
     playing = server.gui.add_checkbox("Playing", initial_value=True)
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         if playing.value:
             slider.value = (slider.value + 1) % timesteps
@@ -121,5 +126,6 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
         time.sleep(1.0 / 10.0)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     tyro.cli(main)

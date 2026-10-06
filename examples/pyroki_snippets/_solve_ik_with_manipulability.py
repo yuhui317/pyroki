@@ -1,6 +1,7 @@
 """
 Solves the basic IK problem.
 """
+# 学习导读：在位姿匹配和关节约束外增加平移可操作度与 rest 代价，演示冗余关节姿态偏好。
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +14,7 @@ import numpy as onp
 import pyroki as pk
 
 
+# 准备目标 SE(3) 与可调可操作度权重，输出一维直接驱动关节解。
 def solve_ik_with_manipulability(
     robot: pk.Robot,
     target_link_name: str,
@@ -52,6 +54,7 @@ def solve_ik_with_manipulability(
     return onp.array(cfg)
 
 
+# 在解析位姿代价之外加入 rest、平移可操作度和限位约束，展示冗余姿态取舍。
 @jdc.jit
 def _solve_ik_jax(
     robot: pk.Robot,
@@ -61,6 +64,7 @@ def _solve_ik_jax(
 ) -> jax.Array:
     joint_var = robot.joint_var_cls(0)
     variables = [joint_var]
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_analytic_jac(
             robot,

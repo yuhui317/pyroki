@@ -1,3 +1,4 @@
+# 学习导读：导出示例可复用的 IK、轨迹优化、在线规划与 J-PARSE 入口；核心库不依赖这些示例封装。
 from ._online_planning import solve_online_planning as solve_online_planning
 from ._solve_ik import solve_ik as solve_ik
 from ._solve_ik_with_base import solve_ik_with_base as solve_ik_with_base

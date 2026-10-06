@@ -7,6 +7,7 @@ handles for start and end EE poses.
 Usage:
     python tests/viz_collision_sweep.py
 """
+# 学习导读：交互显示起止 IK 姿态之间的扫掠碰撞体；这是人工可视检查脚本，不是自动安全证明。
 
 from typing import Literal
 
@@ -33,6 +34,7 @@ from viser.extras import ViserUrdf
 # -------------------------------------------------------------------
 
 
+# 复制基本解析 IK 以求起止配置；此求解器本身未加入碰撞约束。
 @jdc.jit
 def _solve_ik_jax(
     robot: pk.Robot,
@@ -43,6 +45,7 @@ def _solve_ik_jax(
     """JIT-compiled IK solver."""
     joint_var = robot.joint_var_cls(0)
     variables = [joint_var]
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_analytic_jac(
             robot,
@@ -68,6 +71,7 @@ def _solve_ik_jax(
     return sol[joint_var]
 
 
+# 目标名称转索引，NumPy 观测转 JAX 后求配置并回 NumPy。
 def solve_ik(
     robot: pk.Robot,
     target_link_name: str,
@@ -91,10 +95,12 @@ def solve_ik(
 # -------------------------------------------------------------------
 
 
+# 展示两个 IK 解及其扫掠胶囊，目标/类型/透明度变化时重建几何网格。
 def main(robot_name: Literal["ur5", "panda"] = "panda"):
     """Main function for collision sweep visualization."""
     # Load robot and collision models.
     urdf = load_robot_description(f"{robot_name}_description")
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     if robot_name == "ur5":
@@ -122,6 +128,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
     )
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2, cell_size=0.1)
     urdf_vis_start = ViserUrdf(server, urdf, root_node_name="/robot_start")
@@ -192,6 +199,7 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
     urdf_vis_start.update_cfg(cfg_start)
     urdf_vis_end.update_cfg(cfg_end)
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         # Get current state.
         current_start = (tuple(start_handle.position), tuple(start_handle.wxyz))
@@ -271,5 +279,6 @@ def main(robot_name: Literal["ur5", "panda"] = "panda"):
         time.sleep(0.01)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     tyro.cli(main)

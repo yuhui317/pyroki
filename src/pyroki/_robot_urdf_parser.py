@@ -1,4 +1,6 @@
 """URDF parsing utilities for Robot class."""
+# 学习导读：把 yourdfpy 的 URDF 对象转换为 JAX 关节数组和静态拓扑，供 Robot FK 与求解器复用。
+# 本模块解析结构与限位，不进行动力学或控制；索引以 URDF 原顺序保存，另记录父节点优先拓扑序。
 
 from copy import deepcopy
 
@@ -12,6 +14,7 @@ from jaxtyping import Float
 from loguru import logger
 
 
+# 关节数组与静态索引容器，区分所有关节 N_joint 和直接驱动关节 N_act。
 @jdc.pytree_dataclass
 class JointInfo:
     """Contains joint-related information for a robot."""
@@ -58,6 +61,7 @@ class JointInfo:
     _topo_sort_inv: jdc.Static[tuple[int, ...]]
     """Inverse topological sort order, mapping sorted joint index to original joint index."""
 
+    # 按驱动/mimic 索引把末轴 N_act 展开成 N_joint，固定关节取额外补零位置。
     def _map_to_full_joint_space(
         self,
         value_actuated: Float[Array, "*batch n_act_joints"],
@@ -69,6 +73,7 @@ class JointInfo:
         assert value_actuated.shape == (*batch_axes, self.num_actuated_joints)
 
         # Pad input vector to handle fixed joints (index -1) safely.
+        # 末轴补一个零给 fixed/-1 索引，避免以 -1 意外取最后一个真实驱动关节。
         value_padded = jnp.concatenate(
             [value_actuated, jnp.zeros((*batch_axes, 1))], axis=-1
         )
@@ -93,6 +98,7 @@ class JointInfo:
         assert value_referenced.shape == (*batch_axes, self.num_joints)
 
         # Apply mimic multiplier.
+        # mimic 线性关系的 multiplier 同时可正/负；offset 只在位置展开时按 apply_offset 加入。
         value_multiplied = value_referenced * self.mimic_multiplier
 
         # Conditionally add mimic offset.
@@ -103,6 +109,7 @@ class JointInfo:
 
         return value_full
 
+    # 展开关节位置并应用 mimic 的 multiplier 与 offset，供 FK 与所有关节限位残差使用。
     def get_full_config(
         self,
         cfg_actuated: Float[Array, "*batch n_act_joints"],
@@ -121,6 +128,7 @@ class JointInfo:
         return self._map_to_full_joint_space(cfg_actuated, apply_offset=True)
 
 
+# 保存连杆名称/数量和每个连杆的父关节原始索引，根连杆索引为 -1。
 @jdc.pytree_dataclass
 class LinkInfo:
     """Contains link-related information for a robot."""
@@ -130,9 +138,11 @@ class LinkInfo:
     parent_joint_indices: jdc.Static[tuple[int, ...]]
 
 
+# 从 yourdfpy 对象提取运动学树、关节轴、origin、限位及 mimic 关系的静态解析器。
 class RobotURDFParser:
     """Parser for creating Robot instances from URDF files."""
 
+    # 迭代选择父连杆和 mimic 依赖均已就绪的关节；无法推进时抛错，避免无限循环。
     @staticmethod
     def _topologically_sort_joints(
         urdf: yourdfpy.URDF,
@@ -167,6 +177,7 @@ class RobotURDFParser:
                 parent_link = parent_link_of_joint.get(j.child)
 
                 # Check if parent link is ready
+                # 父连杆就绪与 mimic 引用就绪都要满足；不仅按父子树排序。
                 parent_ok = (
                     parent_link == urdf.base_link
                     or parent_link in processed_child_links
@@ -202,6 +213,7 @@ class RobotURDFParser:
 
         return joint_order
 
+    # 两轮扫描分别收集关节与连杆，构造 JointInfo/LinkInfo 并用断言检查数组末轴。
     @staticmethod
     def parse(urdf: yourdfpy.URDF) -> tuple[JointInfo, LinkInfo]:
         """Build joint and link information from a URDF."""
@@ -280,6 +292,7 @@ class RobotURDFParser:
                 parent_joint_idx_list.append(-1)
 
         # Calculate topological sort order
+        # 拓扑序只用于 FK 累计，names、limits 等容器仍保留原始 joint_map 顺序。
         topo_sort_inv_val = RobotURDFParser._topologically_sort_joints(urdf)
 
         # Convert collected lists to arrays
@@ -336,6 +349,7 @@ class RobotURDFParser:
         assert len(link_info.parent_joint_indices) == link_info.num_links
         return joint_info, link_info
 
+    # 直接驱动关节记录自身索引；mimic 记录引用的直接驱动关节及线性系数。
     @staticmethod
     def _get_act_joint_idx_and_mimic(
         urdf: yourdfpy.URDF, joint: yourdfpy.Joint
@@ -355,6 +369,7 @@ class RobotURDFParser:
             act_joint_idx = -1
             mimicked_joint_name = joint.mimic.joint
             mimicked_joint = urdf.joint_map[mimicked_joint_name]
+            # 当前代码直接查找被 mimic 关节在 actuated_joints 中的位置，不递归展开 mimic 链。
             mimic_act_idx = urdf.actuated_joints.index(mimicked_joint)
 
         # If not mimic, check if it's directly actuated.
@@ -368,12 +383,15 @@ class RobotURDFParser:
 
         return act_joint_idx, mimic_act_idx, multiplier, offset
 
+    # 构造 [v_x,v_y,v_z,ω_x,ω_y,ω_z] twist；旋转关节只有角分量，移动关节只有线分量。
     @staticmethod
     def _get_joint_twist(joint: yourdfpy.Joint) -> Array:
         """Get the twist parameters for any joint (zero for fixed)."""
         if joint.type in ("revolute", "continuous"):
+            # 旋转/continuous 的参数通常为弧度；URDF axis 作为角速度方向。
             twist = jnp.concatenate([jnp.zeros(3), joint.axis])
         elif joint.type == "prismatic":
+            # prismatic 的参数为沿关节轴的平移，通常使用米，与旋转关节单位不同。
             twist = jnp.concatenate([joint.axis, jnp.zeros(3)])
         elif joint.type == "fixed":
             twist = jnp.zeros(6)
@@ -387,6 +405,7 @@ class RobotURDFParser:
         assert twist.shape == (6,)
         return twist
 
+    # 读取 joint.origin 或单位矩阵，并找到父关节索引，返回 SE(3) 的 wxyz_xyz 表示。
     @staticmethod
     def _get_T_parent_joint(
         urdf: yourdfpy.URDF,
@@ -416,6 +435,7 @@ class RobotURDFParser:
 
         return (parent_index, jaxlie.SE3.from_matrix(T_parent_joint).wxyz_xyz)
 
+    # 固定关节限位为零；continuous 缺少显式位置范围时用 [-π,π]，其他缺失范围抛错。
     @staticmethod
     def _get_joint_limits(joint: yourdfpy.Joint) -> tuple[float, float]:
         """Get the joint limits defined in the URDF.
@@ -447,6 +467,7 @@ class RobotURDFParser:
         else:
             raise ValueError(f"Joint '{joint.name}' ({joint.type}) has no limits.")
 
+    # 固定关节速度限位为零，其他类型需要 URDF 明确提供 velocity。
     @staticmethod
     def _get_joint_limit_vel(joint: yourdfpy.Joint) -> float:
         """Get the joint velocity limit defined in the URDF.

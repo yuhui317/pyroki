@@ -6,6 +6,8 @@ These functions have the same signature as cost/constraint functions
     limit_cost = Cost.create_factory(limit_residual)
     limit_constraint = Constraint.create_factory(limit_residual, constraint_type="leq_zero")
 """
+# 学习导读：汇总纯残差函数和两种自定义位姿雅可比工厂；外部 costs.py 将残差包装成代价或约束。
+# 原有说明提到的旧 factory 名称保留原样，实际公开构造方式应以 costs.py 为准。
 
 from ._pose_residual_analytic_jac import (
     pose_cost_analytic_jac as pose_cost_analytic_jac,

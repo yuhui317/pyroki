@@ -1,4 +1,6 @@
 """Helper script for updating the auto-generated examples pages in the documentation."""
+# 学习导读：从示例模块 docstring 提取标题/介绍并重建 RST 页面；会删除旧 examples 文档目录再写入。
+# 当前注释任务只阅读并静态检查本脚本，没有执行文档重建。
 
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import m2r2
 import tyro
 
 
+# 存放示例序号、标题、正文与展示源码，以生成文档页。
 @dataclasses.dataclass
 class ExampleMetadata:
     index: str
@@ -19,6 +22,7 @@ class ExampleMetadata:
     title: str
     description: str
 
+    # 从文件名取数字序号、从第一个三引号块取介绍，再保留其后的源码用于页面展示。
     @staticmethod
     def from_path(path: pathlib.Path) -> ExampleMetadata:
         # 01_functions -> 01, _, functions.
@@ -30,6 +34,7 @@ class ExampleMetadata:
 
         print("Parsing", path)
         source = path.read_text().strip()
+        # 文本按首个三引号拆分，依赖示例统一结构，并非完整 Python docstring AST 解析器。
         docstring = source.split('"""')[1].strip()
 
         title, _, description = docstring.partition("\n")
@@ -48,6 +53,7 @@ class ExampleMetadata:
         )
 
 
+# 按路径排序只挑 examples 根目录下的非下划线 Python 文件，不递归 snippets。
 def get_example_paths(examples_dir: pathlib.Path) -> Iterable[pathlib.Path]:
     return filter(
         lambda p: not p.name.startswith("_"), sorted(examples_dir.glob("*.py"))
@@ -57,11 +63,13 @@ def get_example_paths(examples_dir: pathlib.Path) -> Iterable[pathlib.Path]:
 REPO_ROOT = pathlib.Path(__file__).absolute().parent.parent
 
 
+# 重建文档示例目录并为每个示例写 RST；运行会调用 shutil.rmtree 删除旧生成目录。
 def main(
     examples_dir: pathlib.Path = REPO_ROOT / "examples",
     sphinx_source_dir: pathlib.Path = REPO_ROOT / "docs" / "source",
 ) -> None:
     example_doc_dir = sphinx_source_dir / "examples"
+    # 这行会递归删除已生成示例文档目录；本次只加注释，没有运行此脚本。
     shutil.rmtree(example_doc_dir)
     example_doc_dir.mkdir()
 

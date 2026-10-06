@@ -2,6 +2,7 @@
 
 Basic Inverse Kinematics with Collision Avoidance using PyRoKi.
 """
+# 学习导读：Panda IK 加地面/球障碍，交互切换自动胶囊近似与 JSON 球分解，并显示碰撞体。
 
 import json
 import time
@@ -19,10 +20,12 @@ from viser.extras import ViserUrdf
 import pyroki_snippets as pks
 
 
+# 加载两种碰撞近似，交互读取目标/障碍并求 IK；viewer 网格附着到 URDF 层级而自动随关节移动。
 def main():
     """Main function for basic IK with collision."""
     urdf = load_robot_description("panda_description")
     target_link_name = "panda_hand"
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Load sphere decomposition from JSON.
@@ -46,6 +49,7 @@ def main():
     )
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2, cell_size=0.1)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/robot")
@@ -80,6 +84,7 @@ def main():
         server, urdf, robot_coll_sphere, "sphere", "/robot", (0.0, 1.0, 0.0, 0.5)
     )
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         start_time = time.time()
 
@@ -120,6 +125,7 @@ def main():
             h.visible = show_sphere
 
 
+# 沿 trimesh scene 的父链构造每个连杆的 Viser 场景路径，与 visual 层级对齐。
 def _get_link_frame_paths(scene: Scene, prefix: str) -> dict[str, str]:
     """Compute viser frame paths for each link in the URDF scene graph.
 
@@ -145,6 +151,7 @@ def _get_link_frame_paths(scene: Scene, prefix: str) -> dict[str, str]:
     return result
 
 
+# 一次创建局部碰撞网格并附着连杆 frame，随后只切换 visible 而不重复生成网格。
 def _create_collision_handles(
     server: viser.ViserServer,
     urdf: yourdfpy.URDF,
@@ -177,5 +184,6 @@ def _create_collision_handles(
     return handles
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

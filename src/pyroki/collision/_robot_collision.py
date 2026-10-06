@@ -1,3 +1,5 @@
+# 学习导读：URDF 几何近似→局部碰撞体→FK 配置变换→自碰撞对/世界距离矩阵。
+# 胶囊模式每 link 一个几何，球分解模式可有多个球，_geom_to_link_idx 将几何数量与连杆数量分开。
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, cast
@@ -20,6 +22,7 @@ from ._collision import collide
 from ._geometry import Capsule, CollGeom, Sphere
 
 
+# 以静态连杆/碰撞对索引和数值局部几何存机器人碰撞模型，可与同拓扑 Robot 批化使用。
 @jdc.pytree_dataclass
 class RobotCollision:
     """Collision model for a robot, integrated with pyroki kinematics."""
@@ -39,6 +42,7 @@ class RobotCollision:
     _geom_to_link_idx: Int[Array, " num_geoms"]
     """Maps each geometry to its parent link index (for FK transform lookup)."""
 
+    # 从每 link 的碰撞 mesh 自动拟合一枚胶囊，生成默认忽略相邻连杆的活动自碰撞对。
     @staticmethod
     def from_urdf(
         urdf: yourdfpy.URDF,
@@ -81,6 +85,7 @@ class RobotCollision:
             )
 
         # Convert list of trimesh objects into a batched Capsule object.
+        # 每个 link 的胶囊按 parser 连杆顺序堆叠，几何 batch 轴大小等于 N_link。
         capsules = cast(Capsule, jax.tree.map(lambda *args: jnp.stack(args), *cap_list))
         assert capsules.get_batch_axes() == (link_info.num_links,)
 
@@ -106,6 +111,7 @@ class RobotCollision:
             _geom_to_link_idx=jnp.arange(link_info.num_links, dtype=jnp.int32),
         )
 
+    # 按每 link 球列表展开为扁平几何数组，建立球→link 映射和球级活动碰撞对。
     @staticmethod
     def from_sphere_decomposition(
         sphere_decomposition: dict[str, dict[str, list]],
@@ -166,6 +172,7 @@ class RobotCollision:
                 all_radii.append(float(radius))
                 sphere_link_indices.append(link_idx)
 
+        # 球模式几何数可能与 link 数不同，没有分解球的 link 不加入几何数组。
         num_geoms = len(all_centers)
         assert num_geoms > 0, "No spheres found in the provided decomposition."
 
@@ -198,6 +205,7 @@ class RobotCollision:
             _geom_to_link_idx=jnp.array(sphere_link_indices, dtype=jnp.int32),
         )
 
+    # 先构造用户/相邻 link 忽略集合，再展开跨 link 的所有几何对，同 link 几何永不成对。
     @staticmethod
     def _compute_collision_pair_indices(
         link_names: tuple[str, ...],
@@ -257,6 +265,7 @@ class RobotCollision:
         idx_j: list[int] = []
 
         for li in range(num_links):
+            # 只跨不同 link 构造对，排除同 link 内几何及反向重复对。
             for lj in range(li + 1, num_links):
                 if (li, lj) in ignore_set:
                     continue
@@ -267,6 +276,7 @@ class RobotCollision:
 
         return (tuple(idx_i), tuple(idx_j))
 
+    # 读取 URDF collision 的原始形状/mesh，施加 scale 和局部 origin，合并为 link 局部网格。
     @staticmethod
     def _get_trimesh_collision_geometries(
         urdf: yourdfpy.URDF, link_name: str
@@ -315,6 +325,7 @@ class RobotCollision:
                         mesh.apply_scale(scale)
                     elif isinstance(loaded_obj, trimesh.Scene):
                         if len(loaded_obj.geometry) > 0:
+                            # trimesh.Scene 加载结果只取第一个几何，不能由这条分支推断完整多 mesh scene 都已合并。
                             geom_candidate = list(loaded_obj.geometry.values())[0]
                             if isinstance(geom_candidate, trimesh.Trimesh):
                                 mesh = geom_candidate.copy()
@@ -348,6 +359,7 @@ class RobotCollision:
         coll_mesh = sum(coll_meshes, trimesh.Trimesh())
         return coll_mesh
 
+    # 先 FK 再用 _geom_to_link_idx 取每个几何的父 link 位姿，左乘其局部 pose。
     @jdc.jit
     def at_config(
         self, robot: Robot, cfg: Float[Array, "*batch actuated_count"]
@@ -368,6 +380,7 @@ class RobotCollision:
         """
         # Check if the link names match - this should be true if both Robot
         # and RobotCollision were created from the same URDF parser results.
+        # 数值 FK 与碰撞模型必须使用同一个连杆名称/顺序约定，避免几何映射到错误父节点。
         assert self.link_names == robot.links.names, (
             "Link name mismatch between RobotCollision and Robot kinematics."
         )
@@ -376,9 +389,11 @@ class RobotCollision:
         Ts_link_world = jaxlie.SE3(Ts_link_world_wxyz_xyz)
 
         # Index FK transforms by link for each geometry
+        # 从 [*batch,N_link,7] 按 geometry→link 索引取到 [*batch,N_geom,7]。
         Ts_per_geom = jaxlie.SE3(Ts_link_world.wxyz_xyz[..., self._geom_to_link_idx, :])
         return self.coll.transform(Ts_per_geom)
 
+    # 按所属 link 汇总局部几何网格，供附着 ViserUrdf frame 显示，不乘当前世界 FK。
     def get_link_collision_meshes(self) -> dict[str, trimesh.Trimesh]:
         """Get collision meshes for each link in their local coordinate frames.
 
@@ -409,6 +424,7 @@ class RobotCollision:
 
         return result
 
+    # 球模式连接每球的前后中心；胶囊模式先沿轴取 5 球再连接，是相邻姿态扫掠近似。
     def get_swept_capsules(
         self,
         robot: Robot,
@@ -439,6 +455,7 @@ class RobotCollision:
 
         if isinstance(coll_prev_world, Capsule):
             assert isinstance(coll_next_world, Capsule)
+            # 胶囊模式固定 5 个轴向球，前后球中心直线连接；真实关节运动轨迹可为曲线。
             n_segments = 5
             spheres_prev = coll_prev_world.decompose_to_spheres(n_segments)
             spheres_next = coll_next_world.decompose_to_spheres(n_segments)
@@ -458,6 +475,7 @@ class RobotCollision:
                 f"Unsupported collision geometry type: {type(coll_prev_world)}"
             )
 
+    # 只对静态活动几何索引对计算距离，输出 [*batch,N_active_pairs]。
     def compute_self_collision_distance(
         self,
         robot: Robot,
@@ -494,6 +512,7 @@ class RobotCollision:
 
         return active_distances
 
+    # 将机器人几何与世界对象全配对，输出广播后的 [*batch,N_geom,N_world]。
     def compute_world_collision_distance(
         self,
         robot: Robot,
@@ -522,11 +541,13 @@ class RobotCollision:
         coll_robot_world = self.at_config(robot, cfg)
 
         # Derive num_geoms from collision geometry batch axes
+        # 机器人几何集合轴是 batch 前缀的最后一轴，其前面的轴表示配置样本。
         num_geoms = coll_robot_world.get_batch_axes()[-1]
         batch_cfg_shape = coll_robot_world.get_batch_axes()[:-1]
 
         # Normalize world_geom shape and determine num_world
         world_axes = world_geom.get_batch_axes()
+        # 单障碍规范化为长度 1 集合轴；多个世界对象的最后 batch 轴视为 N_world。
         if len(world_axes) == 0:  # Single world object
             _world_geom = world_geom.broadcast_to((1,))
             num_world = 1

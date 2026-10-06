@@ -1,4 +1,6 @@
 """Provides a class for interactively tuning named weights using Viser GUIs."""
+# 学习导读：给普通数值字典建立 Viser 滑块，读取当前权重并支持恢复默认值。
+# 该 GUI 只提供参数输入，优化器是否重算取决于示例的调用逻辑。
 
 from __future__ import annotations
 
@@ -8,6 +10,7 @@ import jax
 import viser
 
 
+# 管理按名称组织的优化权重滑块，实际输入为普通数值字典。
 class WeightTuner:
     """Creates and manages a set of Viser GUI sliders for tuning named weights.
 
@@ -25,6 +28,7 @@ class WeightTuner:
     _step: dict[str, float]
     _default: dict[str, float]
 
+    # 验证字典数值叶节点，用默认或逐键 min/max/step 建立滑块和 Reset 按钮。
     def __init__(
         self,
         server: viser.ViserServer,
@@ -57,6 +61,7 @@ class WeightTuner:
         assert all(isinstance(leaf, (int, float)) for leaf in leaves), (
             "All default parameters must be ints or floats."
         )
+        # 原 Args 说明提到 dataclass，但实际明确断言 dict；调用方不能直接传任意 dataclass 实例。
         assert isinstance(default, dict)
 
         self._server = server
@@ -91,6 +96,7 @@ class WeightTuner:
             reset_button = server.gui.add_button("Reset Weights")
             reset_button.on_click(lambda _: self.reset_weights())
 
+    # 从当前 GUI 句柄读取各权重 float 值，返回名字相同的字典。
     def get_weights(self) -> dict[str, float]:
         """Retrieves the current values of all tracked weights from the GUI sliders.
 
@@ -106,6 +112,7 @@ class WeightTuner:
             )
         }
 
+    # 逐键把滑块还原初始化 default 值，保留滑块范围/步长。
     def reset_weights(self):
         """Resets all weights to their initial values."""
         for name, handle in self._weight_handles.items():

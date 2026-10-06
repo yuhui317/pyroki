@@ -6,6 +6,7 @@
 # full list see the documentation:
 # http://www.sphinx-doc.org/en/stable/config
 
+# 学习导读：Sphinx 文档构建配置，定义版本、扩展、主题、类型提示与输出格式；不是机器人求解入口。
 import os
 from typing import Dict, List
 
@@ -242,6 +243,7 @@ todo_include_todos = True
 # -- Setup function ----------------------------------------
 
 
+# 向 Sphinx 输出页面注册自定义 CSS，不参与模型数值计算。
 def setup(app):
     app.add_css_file("css/custom.css")
 

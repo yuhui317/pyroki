@@ -1,3 +1,5 @@
+# 学习导读：先求带碰撞代价的起止 IK，再线性初始化轨迹，联合优化平滑、加速度、限位与扫掠碰撞约束。
+# 时间步对应不同变量 ID，机器人/碰撞数组补批轴以广播到各时间点。
 from typing import Sequence
 
 import jax
@@ -10,6 +12,7 @@ import pyroki as pk
 from jax.typing import ArrayLike
 
 
+# 用起止 IK 初始化 [T,N_act] 轨迹，再优化全部时间步，保留输入 NumPy/JAX 返回约定。
 def solve_trajopt(
     robot: pk.Robot,
     robot_coll: pk.collision.RobotCollision,
@@ -43,6 +46,7 @@ def solve_trajopt(
     )
 
     # 2. Initialize the trajectory through linearly interpolating the start and end poses.
+    # 插值的是关节配置，不是末端 SE(3) 轨迹；中间点可能先穿障碍，需后续优化处理。
     init_traj = jnp.linspace(start_cfg, end_cfg, timesteps)
 
     # 3. Optimize the trajectory.
@@ -86,14 +90,17 @@ def solve_trajopt(
     costs.append(pk.costs.limit_constraint(robot, traj_vars))
 
     # Start / end pose constraints.
+    # 名为 pose_constraint，实际约束前两步关节配置等于起始 IK 解。
     @jaxls.Cost.factory(kind="constraint_eq_zero", name="start_pose_constraint")
     def start_pose_constraint(vals: jaxls.VarValues, var) -> jax.Array:
         return (vals[var] - start_cfg).flatten()
 
+    # 约束后两步关节配置等于终止 IK 解，从而设置末端静止边界。
     @jaxls.Cost.factory(kind="constraint_eq_zero", name="end_pose_constraint")
     def end_pose_constraint(vals: jaxls.VarValues, var) -> jax.Array:
         return (vals[var] - end_cfg).flatten()
 
+    # 固定前两步配置，末端同样固定后两步，区别于仅固定第一/最后一个点。
     costs.append(start_pose_constraint(robot.joint_var_cls(jnp.arange(0, 2))))
     costs.append(
         end_pose_constraint(robot.joint_var_cls(jnp.arange(timesteps - 2, timesteps)))
@@ -110,6 +117,7 @@ def solve_trajopt(
     )
 
     # World collision avoidance using swept volumes.
+    # 构造相邻配置的扫掠胶囊，输出 signed distance−0.05，供 ≥0 的世界碰撞约束使用。
     def compute_world_coll_residual(
         vals: jaxls.VarValues,
         robot: pk.Robot,
@@ -124,6 +132,7 @@ def solve_trajopt(
         dist = pk.collision.collide(
             coll.reshape((-1, 1)), world_coll_obj.reshape((1, -1))
         )  # >0 means no collision
+        # 扫掠世界距离 residual≥0 对应至少 0.05 的安全距离；具体长度单位随 URDF/障碍尺度。
         return dist.flatten() - 0.05  # safety margin
 
     for world_coll_obj in world_coll:
@@ -137,12 +146,14 @@ def solve_trajopt(
                     robot.joint_var_cls(jnp.arange(0, timesteps - 1)),
                     robot.joint_var_cls(jnp.arange(1, timesteps)),
                 ),
+                # 这个扫掠残差为原 signed distance−margin，因此约束使用≥0，与碰撞激活残差的≤0相反。
                 kind="constraint_geq_zero",
                 name="world Collision (sweep)",
             )
         )
 
     # 4. Solve the optimization problem with augmented Lagrangian for constraints.
+    # 统一交给 LeastSquaresProblem 分析并求解，数值收敛和设备执行均不由本次注释任务验证。
     solution = (
         jaxls.LeastSquaresProblem(
             costs=costs,
@@ -156,6 +167,7 @@ def solve_trajopt(
     return np.array(solution[traj_vars])
 
 
+# 同时求两个变量 ID 的起止配置，以世界碰撞软项和相似度偏好选择初始化。
 @jdc.jit
 def solve_iks_with_collision(
     robot: pk.Robot,
@@ -174,6 +186,7 @@ def solve_iks_with_collision(
     variables = [joint_vars]
 
     # Soft costs: pose matching, regularization, self-collision
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost(
             robot,
@@ -210,6 +223,7 @@ def solve_iks_with_collision(
     ]
 
     # Small cost to encourage the start + end configs to be close to each other.
+    # 惩罚起止关节向量距离，使线性轨迹初始化尽量少跨越不同 IK 分支。
     @jaxls.Cost.factory(name="JointSimilarityCost")
     def joint_similarity_cost(vals, var_0, var_1):
         return (vals[var_0] - vals[var_1]).flatten()

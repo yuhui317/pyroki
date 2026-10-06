@@ -77,3 +77,18 @@ Please cite PyRoki if you find this work useful for your research:
 ```
 
 Thanks!
+
+
+## 本地学习导航
+
+本次学习以固定源码基线做中文整行注释，原代码和数据完整保留。
+
+- [源码学习分析与阅读顺序](study/analysis.md)
+- [完整注释范围与基线](study/annotation_scope.json)
+- [只读注释等价审查工具](study/verify_annotations.py)
+
+学习分支：`codex/study/pyroki-code-analysis`。尚未运行数值示例或提交 commit；审查通过后再按学习流水线提交。
+
+### 学习材料更新与审查
+
+[代码树](study/code_tree.md) · [源码定位](study/code_symbols.md) · [正式验证报告](study/annotation_validation.json)。在本仓目录执行 `python study/generate_study_index.py` 更新树和行号，再执行 `python study/verify_annotations.py --report study/annotation_validation.json` 检查原代码保留情况。工具使用固定基线，不启动上游项目；阅读深度见范围表。

@@ -1,6 +1,7 @@
 """
 Solves the basic IK problem with collision avoidance.
 """
+# 学习导读：在单目标 IK 中加入自碰撞软代价和世界碰撞约束；机器人碰撞体由调用方预先构建。
 
 from typing import Sequence
 
@@ -13,6 +14,7 @@ import numpy as onp
 import pyroki as pk
 
 
+# 把单末端目标打包为 SE(3)，连同碰撞模型/障碍列表传给 JIT 实现。
 def solve_ik_with_collision(
     robot: pk.Robot,
     coll: pk.collision.RobotCollision,
@@ -51,6 +53,7 @@ def solve_ik_with_collision(
     return onp.array(cfg)
 
 
+# 组装位姿、rest、自碰撞软项和限位/世界碰撞约束，求单个关节配置。
 @jdc.jit
 def _solve_ik_with_collision_jax(
     robot: pk.Robot,
@@ -64,6 +67,7 @@ def _solve_ik_with_collision_jax(
     variables = [joint_var]
 
     # Weights and margins defined directly in factors
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost(
             robot,

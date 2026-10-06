@@ -2,6 +2,7 @@
 
 Run online planning in collision aware environments.
 """
+# 学习导读：反复优化短轨迹并执行显示第一步，演示上一轮解复用与移动障碍感知输入。
 
 import time
 
@@ -15,10 +16,12 @@ from viser.extras import ViserUrdf
 import pyroki_snippets as pks
 
 
+# 以上轮短轨迹为初值，刷新障碍并求规划，将第一步配置应用于可视模型。
 def main():
     """Main function for online planning with collision."""
     urdf = load_robot_description("panda_description")
     target_link_name = "panda_hand"
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     robot_coll = RobotCollision.from_urdf(urdf)
@@ -33,6 +36,7 @@ def main():
     len_traj, dt = 5, 0.1
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2, cell_size=0.1)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/robot")
@@ -61,6 +65,7 @@ def main():
     sol_traj = np.array(
         robot.joint_var_cls.default_factory()[None].repeat(len_traj, axis=0)
     )
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         start_time = time.time()
 
@@ -103,5 +108,6 @@ def main():
             target_frame_handle.wxyzs_batched = np.array(sol_wxyz)  # type: ignore[attr-defined]
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

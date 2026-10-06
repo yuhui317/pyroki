@@ -1,3 +1,4 @@
+# 学习导读：构建几何局部坐标、向量归一化和线段最近点工具，主要运算按末轴 xyz 并支持批广播。
 from __future__ import annotations
 
 import jax
@@ -8,6 +9,7 @@ from jaxtyping import Float, Array
 _SAFE_EPS = 1e-6
 
 
+# 归一化方向并构造正交三轴，局部 z 对齐方向；零向量时用 x 方向作后备。
 def make_frame(direction: jax.Array) -> jax.Array:
     """Make a frame from a direction vector, aligning the z-axis with the direction."""
     # Based on `mujoco.mjx._src.math.make_frame`.
@@ -30,6 +32,7 @@ def make_frame(direction: jax.Array) -> jax.Array:
     return jnp.stack([jnp.cross(normal, direction), normal, direction], axis=-1)
 
 
+# 沿末轴归一化向量，零向量保持零，分母后备为 1。
 def normalize(x: Float[Array, "*batch N"]) -> Float[Array, "*batch N"]:
     """Normalizes a vector, handling the zero vector."""
     norm: jax.Array = jnp.linalg.norm(x, axis=-1, keepdims=True)
@@ -38,6 +41,7 @@ def normalize(x: Float[Array, "*batch N"]) -> Float[Array, "*batch N"]:
     return jnp.where(norm == 0.0, jnp.zeros_like(x), normalized_x)
 
 
+# 同时返回归一化向量和 norm；实际 norm 对 x+1e−6 求，故零输入也有微小非零 norm。
 def normalize_with_norm(
     x: Float[Array, "*batch N"],
 ) -> Tuple[Float[Array, "*batch N"], Float[Array, "*batch"]]:
@@ -50,6 +54,7 @@ def normalize_with_norm(
     return result_vec, result_norm
 
 
+# 投影点到线段参数 t，并裁 [0,1] 取最近线段点，分母加 eps 稳定退化段。
 def closest_segment_point(
     a: Float[Array, "*batch 3"],
     b: Float[Array, "*batch 3"],
@@ -64,6 +69,7 @@ def closest_segment_point(
     return a + ab * t_clamped[..., None]
 
 
+# 解两线段最近参数，处理平行/边界裁剪后重新计算另一参数，返回各自最近点。
 def closest_segment_to_segment_points(
     a1: Float[Array, "*batch 3"],
     b1: Float[Array, "*batch 3"],
@@ -80,6 +86,7 @@ def closest_segment_to_segment_points(
     f = jnp.einsum("...i,...i->...", d2, r)
     c = jnp.einsum("...i,...i->...", d1, r)
     b = jnp.einsum("...i,...i->...", d1, d2)
+    # 接近平行的线段令分母接近零，下面改用单段投影的后备参数。
     denom = a * e - b * b  # Squared area of the parallelogram defined by d1, d2
 
     s_num = b * f - c * e
@@ -97,6 +104,7 @@ def closest_segment_to_segment_points(
     t_recomp = jnp.einsum(
         "...i,...i->...", d2, (a1 + d1 * s_clamped[..., None]) - a2
     ) / (e + _SAFE_EPS)
+    # 参数裁剪后另一线段最近点要重算，不能只把无界解各自裁剪一次。
     t_final = jnp.where(
         jnp.abs(s - s_clamped) > _SAFE_EPS, jnp.clip(t_recomp, 0.0, 1.0), t_clamped
     )

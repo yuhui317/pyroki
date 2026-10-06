@@ -1,3 +1,5 @@
+# 学习导读：按几何类型派发 signed distance 函数并处理批广播，另提供成对矩阵和安全距离激活。
+# 原距离正值表示分离、负值表示穿透；colldist_from_sdf 激活结果非正，代价常在外部取负或平方。
 from __future__ import annotations
 
 from typing import Callable, Dict, Tuple, cast
@@ -21,6 +23,7 @@ from ._geometry_pairs import (
     sphere_sphere,
 )
 
+# 这里只登记明确实现的类型组合；存在 Box 类不意味着支持 Box–Box 等任意组合。
 COLLISION_FUNCTIONS: Dict[
     Tuple[type[CollGeom], type[CollGeom]], Callable[..., Float[Array, "*batch"]]
 ] = {
@@ -38,6 +41,7 @@ COLLISION_FUNCTIONS: Dict[
 }
 
 
+# 按类型对查距离函数，找不到时交换参数尝试；仍缺失则显式抛 NotImplementedError。
 def _get_coll_func(
     geom1_cls: type[CollGeom], geom2_cls: type[CollGeom]
 ) -> Callable[[CollGeom, CollGeom], Float[Array, "*batch"]]:
@@ -46,6 +50,7 @@ def _get_coll_func(
     if func is not None:
         return cast(Callable[[CollGeom, CollGeom], Float[Array, "*batch"]], func)
 
+    # 距离对称时复用交换后的已登记实现，不要求显式登记两个顺序。
     func_swapped = COLLISION_FUNCTIONS.get((geom2_cls, geom1_cls))
     if func_swapped is not None:
         return cast(
@@ -58,6 +63,7 @@ def _get_coll_func(
     )
 
 
+# 广播两几何对象的 batch 轴后调用对应距离函数，返回广播后的 signed distance 张量。
 def collide(geom1: CollGeom, geom2: CollGeom) -> Float[Array, "*batch"]:
     """Calculate collision distance between two geometric objects, handling broadcasting.
     Positive distance means separation, negative means penetration.
@@ -78,6 +84,7 @@ def collide(geom1: CollGeom, geom2: CollGeom) -> Float[Array, "*batch"]:
     return _get_coll_func(geom1_cls, geom2_cls)(geom1, geom2)
 
 
+# 把最后集合轴 N/M 扩成 N×M，利用广播计算两组几何的全对距离矩阵。
 def pairwise_collide(geom1: CollGeom, geom2: CollGeom) -> Float[Array, "*batch N M"]:
     """
     Convenience wrapper around `collide` for computing pairwise distances with broadcasting.
@@ -115,6 +122,7 @@ def pairwise_collide(geom1: CollGeom, geom2: CollGeom) -> Float[Array, "*batch N
         raise ValueError(
             f"Cannot broadcast non-mapped batch shapes {batch1_shape} and {batch2_shape}"
         ) from e
+    # 集合轴从各自最后 batch 轴取 N/M，其余样本前缀须可广播。
     expected_output_shape = (*batch_combined_shape, N, M)
     result = collide(
         geom1.broadcast_to((*batch_combined_shape, N))
@@ -130,6 +138,7 @@ def pairwise_collide(geom1: CollGeom, geom2: CollGeom) -> Float[Array, "*batch N
     return result
 
 
+# 将安全距离内的 signed distance 分段平滑到≤0 激活，超过 activation_dist 时为零。
 def colldist_from_sdf(
     _dist: jax.Array,
     activation_dist: jax.Array | float,
@@ -151,6 +160,7 @@ def colldist_from_sdf(
         Transformed collision distance field values (<= 0).
     """
     _dist = jnp.minimum(_dist, activation_dist)
+    # 穿透区域采用线性分支，安全距离内非穿透采用二次分支，最终截到非正值。
     _dist = jnp.where(
         _dist < 0,
         _dist - 0.5 * activation_dist,

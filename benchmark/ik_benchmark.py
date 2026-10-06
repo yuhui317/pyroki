@@ -31,6 +31,8 @@ Hardware:
 - CPU: AMD Ryzen 7 7700X 8-Core Processor
 - GPU: NVIDIA GeForce RTX 4090
 """
+# 学习导读：比较多初值 PyRoki IK 与 cuRobo 的独立基准脚本，包含批目标、JIT 预热和误差统计。
+# 原 docstring 中数据是历史示例，不代表当前机器测量；此模块导入时就构造 helper，不能用普通 import 作无副作用检查。
 
 
 # pyright: reportMissingImports=false
@@ -97,9 +99,11 @@ from jax import numpy as jnp
 from robot_descriptions.loaders.yourdfpy import load_robot_description
 
 
+# 迭代求标量方程的根以生成低差异采样基数；实际 scan 初值固定为 1.0，传入 x 未使用。
 def newton_raphson(f, x, iters):
     """Use the Newton-Raphson method to find a root of the given function."""
 
+    # 执行单步 x−f(x)/f′(x)，未另处理零导数边界。
     def update(x, _):
         y = x - f(x) / jax.grad(f)(x)
         return y, None
@@ -108,6 +112,7 @@ def newton_raphson(f, x, iters):
     return x
 
 
+# 用给定 root 构造低差异序列，返回 [num_points,dim] 的小数部分种子。
 def roberts_sequence(num_points, dim, root):
     # From https://gist.github.com/carlosgmartin/1fd4e60bed526ec8ae076137ded6ebab.
     basis = 1 - (1 / root ** (1 + jnp.arange(dim)))
@@ -119,7 +124,9 @@ def roberts_sequence(num_points, dim, root):
     return x
 
 
+# Panda 多初值束搜索 IK 基准封装；固定夹爪关节以尽量对齐 cuRobo 的关节空间。
 class PyrokiIkBeamHelper:
+    # 加载 Panda、在内存 URDF 中改夹爪为 fixed，再创建 Robot 与采样基数；不修改仓库 URDF 文件。
     def __init__(self):
         # Get the Panda robot. We fix the prismatic (gripper) joints. This is to
         # match cuRobo, it makes a very small runtime difference.
@@ -146,6 +153,7 @@ class PyrokiIkBeamHelper:
         self.root = newton_raphson(lambda x: x ** (exp + 1) - x - 1, 1.0, 10_000)
         self.target_link_index = target_link_index
 
+    # 先优化 64 个初值 6 步，选 4 个较好解继续至总计 16 步，再按代价择优。
     def solve_ik(self, target_wxyz: jax.Array, target_position: jax.Array) -> jax.Array:
         num_seeds_init: int = 64
         num_seeds_final: int = 4
@@ -153,6 +161,7 @@ class PyrokiIkBeamHelper:
         total_steps: int = 16
         init_steps: int = 6
 
+        # 构造单初值 IK、软限位与固定迭代次数，返回关节解和求解历史以筛选/继承阻尼。
         def solve_one(
             initial_q: jax.Array, lambda_initial: float | jax.Array, max_iters: int
         ) -> tuple[jax.Array, jaxls.SolveSummary]:
@@ -226,6 +235,7 @@ class PyrokiIkBeamHelper:
             )
         ]
 
+    # 读取目标 panda_hand_tcp 的 7 维 FK，用于从采样配置构造可达目标。
     def forward_kinematics(self, q: jax.Array | np.ndarray) -> jax.Array:
         return self.robot.forward_kinematics(jnp.asarray(q))[self.target_link_index]
 
@@ -236,6 +246,7 @@ batched_ik = jax.jit(jax.vmap(ik_beam.solve_ik))
 batched_fk = jax.jit(jax.vmap(ik_beam.forward_kinematics))
 
 
+# 从采样配置 FK 生成目标，预热 JIT 后同步计时，并按位置/旋转阈值统计成功样本 98 分位误差。
 def evaluate_pyroki_ik(q_sample: torch.Tensor):
     # Get target poses.
     q_sample = q_sample.numpy(force=True)  # type: ignore
@@ -244,11 +255,13 @@ def evaluate_pyroki_ik(q_sample: torch.Tensor):
     target_position_jax = target_wxyz_xyz[..., 4:7]
 
     # JIT compile
+    # 编译/预热与计时分开，并显式等待 JAX 异步结果就绪，避免仅测提交调用时间。
     jax.block_until_ready(batched_ik(target_wxyz_jax, target_position_jax))
 
     # Run the function
     start = time.time()
     solution = batched_ik(target_wxyz_jax, target_position_jax)
+    # 正式计时也等待设备完成，随后按批大小算每目标耗时。
     jax.block_until_ready(solution)
     total_time = (time.time() - start) / target_wxyz_jax.shape[0]
 
@@ -262,6 +275,7 @@ def evaluate_pyroki_ik(q_sample: torch.Tensor):
     assert position_error.shape == (target_wxyz_jax.shape[0],)
 
     # Copied from cuRobo
+    # 成功条件使用 5mm 平移和 0.05rad 旋转误差阈值；不是碰撞成功率。
     position_threshold: float = 0.005
     rotation_threshold: float = 0.05
 
@@ -282,11 +296,13 @@ def evaluate_pyroki_ik(q_sample: torch.Tensor):
     return (
         total_time,
         np.mean(success_mask) * 100.0,
+        # 只对成功目标求 98 分位误差；若没有成功样本，空集合统计需额外处理。
         np.percentile(position_error[success_mask], 98),
         np.percentile(orientation_error[success_mask], 98),
     )
 
 
+# 构造 cuRobo 场景与 IK 参数，采可达目标并重复求解，返回两实现的时间/成功率/误差。
 def run_full_config_collision_free_ik(
     robot_file,
     world_file,
@@ -404,6 +420,7 @@ if __name__ == "__main__":
                 world_file,
                 batch_size=b_size,
                 use_cuda_graph=True,
+                # 默认主入口比较关闭碰撞的 IK，不能由该表推出碰撞重场景性能。
                 collision_free=False,
                 high_precision=args.high_precision,
                 num_seeds=args.num_seeds,

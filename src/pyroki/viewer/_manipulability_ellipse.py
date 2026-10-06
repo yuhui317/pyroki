@@ -1,3 +1,5 @@
+# 学习导读：用 FK 的平移 Jacobian 绘制三维可操作椭球，并显示 Yoshikawa 指标。
+# 这是数值/视觉诊断，不能代表姿态可操作度、动力学可达性或碰撞安全性。
 from typing import Optional, Tuple
 
 import jax
@@ -12,9 +14,11 @@ from loguru import logger
 from .._robot import Robot
 
 
+# 保存目标 link 与 Viser mesh，显示平移速度可操作椭球和指标。
 class ManipulabilityEllipse:
     """Helper class to visualize the manipulability ellipsoid for a robot link."""
 
+    # 建立初始 mesh、目标 link 和显示属性，球网格随后按 Jacobian 特征分解变成椭球。
     def __init__(
         self,
         server: viser.ViserServer | viser.ClientHandle,
@@ -60,6 +64,7 @@ class ManipulabilityEllipse:
 
         self.manipulability = 0.0
 
+    # 移除旧 mesh 并建立待更新的占位网格，同时兼容 Viser 阴影属性。
     def _create_mesh_handle(self):
         """Creates or recreates the mesh handle in the Viser scene."""
         if self._mesh_handle is not None:
@@ -81,6 +86,7 @@ class ManipulabilityEllipse:
                 False  # Ellipsoids usually don't need shadows
             )
 
+    # 名称转 link 索引；None/无效名称会同时设置 _visible=False，需要之后显式恢复显示。
     def set_target_link(self, link_name: Optional[str]):
         """Sets the target link for which to display the ellipsoid.
 
@@ -102,6 +108,7 @@ class ManipulabilityEllipse:
                 self._target_link_index = None
                 self.set_visibility(False)  # Hide if link not found
 
+    # 自动微分平移 FK，分解 JJᵀ 得轴长/方向，再移动椭球至目标 link；失败时隐藏网格。
     def update(self, joints: ArrayLike):
         """Updates the ellipsoid based on the current joint configuration.
 
@@ -130,6 +137,7 @@ class ManipulabilityEllipse:
             jacobian = jax.jacfwd(
                 lambda q: jaxlie.SE3(self._robot.forward_kinematics(q)).translation()
             )(joints)[self._target_link_index]
+            # 仅平移 3×N_act Jacobian，椭球对应单位关节速度球映射出的末端平移速度。
             assert jacobian.shape == (3, self._robot.joints.num_actuated_joints)
 
             # --- Manipulability Calculation ---
@@ -142,6 +150,7 @@ class ManipulabilityEllipse:
             assert cov_matrix.shape == (3, 3)
             # Use numpy for Eigh as it might be more stable for visualization
             vals, vecs = onp.linalg.eigh(onp.array(cov_matrix))
+            # 小特征值显示时限幅，避免退化网格；不改变优化器使用的残差公式。
             vals = onp.maximum(vals, 1e-9)  # Clamp small eigenvalues for stability
 
             # --- Get Target Link Pose ---
@@ -157,6 +166,7 @@ class ManipulabilityEllipse:
             tf[:3, 3] = target_pos  # Translation to link origin
 
             # Apply scaling according to eigenvalues and the scaling factor
+            # 轴长取 JJᵀ 特征值平方根，也就是平移 Jacobian 的奇异值，再乘显示缩放因子。
             ellipsoid_mesh.apply_scale(onp.sqrt(vals) * self._scaling_factor)
             # Apply the final transform
             ellipsoid_mesh.apply_transform(tf)
@@ -173,6 +183,7 @@ class ManipulabilityEllipse:
             if self._mesh_handle is not None:
                 self._mesh_handle.visible = False
 
+    # 同步内部/显示可见性；重新开启且有历史配置时重算网格。
     def set_visibility(self, visible: bool):
         """Sets the visibility of the ellipsoid mesh."""
         self._visible = visible
@@ -189,6 +200,7 @@ class ManipulabilityEllipse:
             elif self._mesh_handle.visible != visible:
                 self._mesh_handle.visible = visible
 
+    # 移除场景网格并清空目标索引，释放显示句柄。
     def remove(self):
         """Removes the ellipsoid mesh from the Viser scene."""
         if self._mesh_handle is not None:

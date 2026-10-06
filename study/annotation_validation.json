@@ -1,0 +1,603 @@
+{
+  "baseline": "388e43e1fc0d0ee382968d3dd72970fd62a0450c",
+  "branch": "codex/study/pyroki-code-analysis",
+  "original_files": 86,
+  "verified_files": 86,
+  "gitlink_references": [],
+  "annotated_files": 48,
+  "modified_original_files": 49,
+  "annotated_python_definitions": 262,
+  "runtime_or_gpu_executed": false,
+  "cpp_compilation_executed": false,
+  "new_study_tools": [
+    {
+      "path": "study/generate_study_index.py",
+      "syntax": "passed",
+      "definitions": 8
+    },
+    {
+      "path": "study/verify_annotations.py",
+      "syntax": "passed",
+      "definitions": 9
+    }
+  ],
+  "limitations": "C++ lexical/static check only, not preprocessing or compilation; pinned submodule contents are not checked",
+  "passed": true,
+  "failures": [],
+  "files": [
+    {
+      "path": ".github/workflows/docs.yml",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": ".github/workflows/formatting.yaml",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": ".github/workflows/pyright.yml",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": ".github/workflows/pytest.yml",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": ".gitignore",
+      "changed": false,
+      "added_lines": 0
+    },
+    {
+      "path": "LICENSE",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "README.md",
+      "changed": true,
+      "added_lines": 15
+    },
+    {
+      "path": "benchmark/ik_benchmark.py",
+      "changed": true,
+      "added_lines": 17,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 10
+    },
+    {
+      "path": "docs/Makefile",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/README.md",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/requirements.txt",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/_static/basic_ik.mov",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/_static/css/custom.css",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/_static/logo.svg",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/_static/logo_dark.svg",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/_templates/sidebar/brand.html",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/conf.py",
+      "changed": true,
+      "added_lines": 2,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "docs/source/examples/01_basic_ik.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/02_bimanual_ik.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/03_mobile_ik.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/04_ik_with_coll.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/05_ik_with_manipulability.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/06_online_planning.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/07_trajopt.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/08_ik_with_mimic_joints.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/09_hand_retargeting.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/10_humanoid_retargeting.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/11_hand_retargeting_fancy.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/examples/12_humanoid_retargeting_fancy.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/index.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/source/misc/writing_manual_jac.rst",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "docs/update_example_docs.py",
+      "changed": true,
+      "added_lines": 8,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "examples/01_basic_ik.py",
+      "changed": true,
+      "added_lines": 7,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/02_bimanual_ik.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/03_mobile_ik.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/04_ik_with_coll.py",
+      "changed": true,
+      "added_lines": 8,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 3
+    },
+    {
+      "path": "examples/05_ik_with_manipulability.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/06_online_planning.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/07_trajopt.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/08_ik_with_mimic_joints.py",
+      "changed": true,
+      "added_lines": 9,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "examples/09_hand_retargeting.py",
+      "changed": true,
+      "added_lines": 25,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 10
+    },
+    {
+      "path": "examples/10_humanoid_retargeting.py",
+      "changed": true,
+      "added_lines": 22,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 8
+    },
+    {
+      "path": "examples/11_hand_retargeting_fancy.py",
+      "changed": true,
+      "added_lines": 28,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 12
+    },
+    {
+      "path": "examples/12_humanoid_retargeting_fancy.py",
+      "changed": true,
+      "added_lines": 29,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 13
+    },
+    {
+      "path": "examples/13_ik_with_locked_joints.py",
+      "changed": true,
+      "added_lines": 15,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "examples/14_singularity_aware_ik.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 1
+    },
+    {
+      "path": "examples/assets/panda_spheres.json",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/assets/ur5_spheres.json",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/pyroki_snippets/__init__.py",
+      "changed": true,
+      "added_lines": 1,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "examples/pyroki_snippets/_jparse.py",
+      "changed": true,
+      "added_lines": 16,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 8
+    },
+    {
+      "path": "examples/pyroki_snippets/_online_planning.py",
+      "changed": true,
+      "added_lines": 15,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 8
+    },
+    {
+      "path": "examples/pyroki_snippets/_solve_ik.py",
+      "changed": true,
+      "added_lines": 8,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 2
+    },
+    {
+      "path": "examples/pyroki_snippets/_solve_ik_with_base.py",
+      "changed": true,
+      "added_lines": 9,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "examples/pyroki_snippets/_solve_ik_with_collision.py",
+      "changed": true,
+      "added_lines": 4,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 2
+    },
+    {
+      "path": "examples/pyroki_snippets/_solve_ik_with_manipulability.py",
+      "changed": true,
+      "added_lines": 4,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 2
+    },
+    {
+      "path": "examples/pyroki_snippets/_solve_ik_with_multiple_targets.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 2
+    },
+    {
+      "path": "examples/pyroki_snippets/_trajopt.py",
+      "changed": true,
+      "added_lines": 14,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 6
+    },
+    {
+      "path": "examples/retarget_helpers/_utils.py",
+      "changed": true,
+      "added_lines": 6,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "examples/retarget_helpers/hand/dexycb_motion.pkl",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/retarget_helpers/hand/shadowhand_urdf.zip",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/retarget_helpers/humanoid/heightmap.npy",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/retarget_helpers/humanoid/left_foot_contact.npy",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/retarget_helpers/humanoid/right_foot_contact.npy",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "examples/retarget_helpers/humanoid/smpl_keypoints.npy",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "pyproject.toml",
+      "changed": false,
+      "protected_bytes": "equal"
+    },
+    {
+      "path": "src/pyroki/__init__.py",
+      "changed": true,
+      "added_lines": 1,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/_residuals/__init__.py",
+      "changed": true,
+      "added_lines": 2,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/_residuals/_pose_residual_analytic_jac.py",
+      "changed": true,
+      "added_lines": 12,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 5
+    },
+    {
+      "path": "src/pyroki/_residuals/_pose_residual_numerical_jac.py",
+      "changed": true,
+      "added_lines": 7,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 3
+    },
+    {
+      "path": "src/pyroki/_residuals/_residuals.py",
+      "changed": true,
+      "added_lines": 28,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 16
+    },
+    {
+      "path": "src/pyroki/_robot.py",
+      "changed": true,
+      "added_lines": 16,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 7
+    },
+    {
+      "path": "src/pyroki/_robot_urdf_parser.py",
+      "changed": true,
+      "added_lines": 21,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 12
+    },
+    {
+      "path": "src/pyroki/collision/__init__.py",
+      "changed": true,
+      "added_lines": 2,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/collision/_collision.py",
+      "changed": true,
+      "added_lines": 10,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "src/pyroki/collision/_geometry.py",
+      "changed": true,
+      "added_lines": 59,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 45
+    },
+    {
+      "path": "src/pyroki/collision/_geometry_pairs.py",
+      "changed": true,
+      "added_lines": 22,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 15
+    },
+    {
+      "path": "src/pyroki/collision/_robot_collision.py",
+      "changed": true,
+      "added_lines": 21,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 10
+    },
+    {
+      "path": "src/pyroki/collision/_utils.py",
+      "changed": true,
+      "added_lines": 8,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 5
+    },
+    {
+      "path": "src/pyroki/costs.py",
+      "changed": true,
+      "added_lines": 5,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/utils.py",
+      "changed": true,
+      "added_lines": 4,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 3
+    },
+    {
+      "path": "src/pyroki/viewer/__init__.py",
+      "changed": true,
+      "added_lines": 1,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/viewer/_batched_urdf.py",
+      "changed": true,
+      "added_lines": 9,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 0
+    },
+    {
+      "path": "src/pyroki/viewer/_manipulability_ellipse.py",
+      "changed": true,
+      "added_lines": 12,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 7
+    },
+    {
+      "path": "src/pyroki/viewer/_weight_tuner.py",
+      "changed": true,
+      "added_lines": 7,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 4
+    },
+    {
+      "path": "tests/test_ik_vmap.py",
+      "changed": true,
+      "added_lines": 17,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 9
+    },
+    {
+      "path": "tests/viz_collision_sweep.py",
+      "changed": true,
+      "added_lines": 9,
+      "python_ast": "equal",
+      "python_executable_tokens": "equal",
+      "definitions": 3
+    }
+  ]
+}

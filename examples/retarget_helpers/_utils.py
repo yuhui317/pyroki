@@ -1,7 +1,10 @@
+# 学习导读：保存人体/机器人名称对应表，并构建用于重定向局部向量匹配的连接掩码。
+# 名称/索引约定属于具体 MANO、SMPL 与 G1/Shadow 模型，不是可直接泛化的通用机器人映射。
 import pyroki as pk
 import jax.numpy as jnp
 
 
+# 对选定索引构造对称连接矩阵，只有祖先链上未遇到其他选定节点时判为直接连接。
 def create_conn_tree(robot: pk.Robot, link_indices: jnp.ndarray) -> jnp.ndarray:
     """
     Create a NxN connectivity matrix for N links.
@@ -11,6 +14,7 @@ def create_conn_tree(robot: pk.Robot, link_indices: jnp.ndarray) -> jnp.ndarray:
     n = len(link_indices)
     conn_matrix = jnp.zeros((n, n))
 
+    # 沿两条父关节链回溯，检查能否直接连接；实现把传入 link_indices 当作关节索引使用，需核对模型编号。
     def is_direct_chain_connection(idx1: int, idx2: int) -> bool:
         """Check if two joints are connected in the kinematic chain without other retargeted joints between"""
         joint1 = link_indices[idx1]
@@ -144,6 +148,7 @@ G1_LINK_NAMES = [
 ]
 
 
+# 按固定 SMPL/G1 名称列表构造 13 对索引；模型名序变化时不能仅信任旧数字。
 def get_humanoid_retarget_indices() -> tuple[jnp.ndarray, jnp.ndarray]:
     smpl_joint_retarget_indices_to_g1 = []
     g1_joint_retarget_indices = []
@@ -202,6 +207,7 @@ MANO_TO_SHADOW_MAPPING = {
 }
 
 
+# 遍历 Robot.links.names，为实际存在的 Shadow 连杆建立 MANO 对应索引。
 def get_mapping_from_mano_to_shadow(robot: pk.Robot) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Get the mapping indices between MANO and Shadow Hand joints."""
     SHADOW_TO_MANO_MAPPING = {v: k for k, v in MANO_TO_SHADOW_MAPPING.items()}

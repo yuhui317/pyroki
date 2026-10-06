@@ -6,6 +6,8 @@ These functions have the same signature as cost/constraint functions
     limit_cost = Cost.create_factory(limit_residual)
     limit_constraint = Constraint.create_factory(limit_residual, constraint_type="leq_zero")
 """
+# 学习导读：以 VarValues 读取优化变量，输出加权残差；包含位姿、限位、平滑、可操作度与碰撞。
+# 权重在残差层相乘，因此最小二乘中的平方项会带权重的平方；约束符号以实际 return 表达式为准。
 
 import jax
 import jax.numpy as jnp
@@ -20,6 +22,7 @@ from ..collision import CollGeom, RobotCollision, colldist_from_sdf
 # --- Pose Residuals ---
 
 
+# 匹配单个目标连杆：log(actual⁻¹·target) 的前三维平移、后三维旋转分别加权并展平。
 def pose_residual(
     vals: VarValues,
     robot: Robot,
@@ -34,12 +37,14 @@ def pose_residual(
     joint_cfg = vals[joint_var]
     Ts_link_world = robot.forward_kinematics(joint_cfg)
     pose_actual = jaxlie.SE3(Ts_link_world[..., target_link_index, :])
+    # SE(3) log 返回 6 维切向量，前三维受旋转误差影响，不应直接等同世界 xyz 差。
     residual = (pose_actual.inverse() @ target_pose).log()
     pos_residual = residual[..., :3] * pos_weight
     ori_residual = residual[..., 3:] * ori_weight
     return jnp.concatenate([pos_residual, ori_residual]).flatten()
 
 
+# 先以可优化的 T_world_base 乘基座相对 FK，再计算世界目标的 SE(3) 误差。
 def pose_with_base_residual(
     vals: VarValues,
     robot: Robot,
@@ -67,6 +72,7 @@ def pose_with_base_residual(
 # --- Limit Residuals ---
 
 
+# 检查含 mimic/fixed 的完整配置位置范围，实际返回非负越界量；范围内为零。
 def limit_residual(
     vals: VarValues,
     robot: Robot,
@@ -83,11 +89,13 @@ def limit_residual(
     """
     joint_cfg = vals[joint_var]
     joint_cfg_eff = robot.joints.get_full_config(joint_cfg)
+    # 原 docstring 写范围内负值，但 max(0,·) 的实现实际上范围内为零、越界才为正。
     upper_violation = jnp.maximum(0.0, joint_cfg_eff - robot.joints.upper_limits_all)
     lower_violation = jnp.maximum(0.0, robot.joints.lower_limits_all - joint_cfg_eff)
     return (jnp.concatenate([upper_violation, lower_violation]) * weight).flatten()
 
 
+# 用相邻直接驱动配置差除 dt 得到速度，返回超过 URDF 速度限位的非负部分。
 def limit_velocity_residual(
     vals: VarValues,
     robot: Robot,
@@ -102,6 +110,7 @@ def limit_velocity_residual(
     - Positive when violated (|velocity| > limit)
     - Zero when satisfied (|velocity| <= limit)
     """
+    # dt 必须非零并与轨迹采样周期一致；旋转/移动关节对应 rad/s 或 m/s。
     joint_vel = (vals[joint_var] - vals[prev_joint_var]) / dt
     residual = jnp.maximum(0.0, jnp.abs(joint_vel) - robot.joints.velocity_limits)
     return (residual * weight).flatten()
@@ -110,6 +119,7 @@ def limit_velocity_residual(
 # --- Regularization Residuals ---
 
 
+# 将配置拉向给定 rest_pose，以 residual weight 逐维加权。
 def rest_residual(
     vals: VarValues,
     joint_var: Var[Array],
@@ -120,6 +130,7 @@ def rest_residual(
     return ((vals[joint_var] - rest_pose) * weight).flatten()
 
 
+# 同时正则关节与基座切空间位姿误差，基座参照其变量默认值。
 def rest_with_base_residual(
     vals: VarValues,
     joint_var: Var[Array],
@@ -135,6 +146,7 @@ def rest_with_base_residual(
     return (jnp.concatenate([residual_joints, residual_base]) * weight).flatten()
 
 
+# 惩罚相邻配置差，当前函数不除 dt，因此它是步间平滑项而非物理速度本身。
 def smoothness_residual(
     vals: VarValues,
     curr_joint_var: Var[Array],
@@ -148,6 +160,7 @@ def smoothness_residual(
 # --- Manipulability Residual ---
 
 
+# 自动微分目标平移得到 3×N_act Jacobian，计算 sqrt(max(0,det(JJᵀ)))。
 def _compute_manip_yoshikawa(
     cfg: Array,
     robot: Robot,
@@ -157,11 +170,13 @@ def _compute_manip_yoshikawa(
     jacobian = jax.jacfwd(
         lambda q: jaxlie.SE3(robot.forward_kinematics(q)).translation()
     )(cfg)[target_link_index]
+    # 此可操作度只用 3 维平移 Jacobian，不能据它推断完整 6D 位姿灵巧性。
     JJT = jacobian @ jacobian.T
     assert JJT.shape == (3, 3)
     return jnp.sqrt(jnp.maximum(0.0, jnp.linalg.det(JJT)))
 
 
+# 对指定目标连杆的平移可操作度取倒数惩罚，可沿目标索引做 vmap。
 def manipulability_residual(
     vals: VarValues,
     robot: Robot,
@@ -184,6 +199,7 @@ def manipulability_residual(
 # --- Collision Residuals ---
 
 
+# 由当前配置计算活动自碰撞对距离，转换为安全距离内非负惩罚并展平。
 def self_collision_residual(
     vals: VarValues,
     robot: Robot,
@@ -194,10 +210,12 @@ def self_collision_residual(
 ) -> Array:
     """Computes self-collision violation residual. Residual is >0 if collision is detected."""
     cfg = vals[joint_var]
+    # signed distance 正值为分離、负值为穿透；colldist 返回≤0，所以这里额外取负得到非负残差。
     active_distances = robot_coll.compute_self_collision_distance(robot, cfg)
     return -(colldist_from_sdf(active_distances, margin) * weight).flatten()
 
 
+# 计算机器人几何体与世界几何体的距离矩阵，再变成安全距离内非负惩罚。
 def world_collision_residual(
     vals: VarValues,
     robot: Robot,
@@ -216,6 +234,7 @@ def world_collision_residual(
 # --- Finite Difference Residuals ---
 
 
+# 以四个邻点构造五点中心一阶差分，惩罚超出直接驱动速度限位的部分。
 def five_point_velocity_residual(
     vals: VarValues,
     robot: Robot,
@@ -237,12 +256,14 @@ def five_point_velocity_residual(
     q_tp1 = vals[var_t_plus_1]
     q_tp2 = vals[var_t_plus_2]
 
+    # 中心一阶差分系数 [-1,8,-8,1]/(12dt)，结果单位随关节为每秒。
     velocity = (-q_tp2 + 8 * q_tp1 - 8 * q_tm1 + q_tm2) / (12 * dt)
     vel_limits = robot.joints.velocity_limits
     residual = jnp.maximum(0.0, jnp.abs(velocity) - vel_limits)
     return (residual * weight).flatten()
 
 
+# 用五点中心二阶差分估算加速度，返回其逐维绝对值用于软平滑。
 def five_point_acceleration_residual(
     vals: VarValues,
     var_t: Var[Array],
@@ -260,11 +281,13 @@ def five_point_acceleration_residual(
     q_tp1 = vals[var_t_plus_1]
     q_tp2 = vals[var_t_plus_2]
 
+    # 五点二阶差分除以 dt²；调用方须提供 t±1/t±2 的对齐变量 ID。
     acceleration = (-q_tp2 + 16 * q_tp1 - 30 * q_t + 16 * q_tm1 - q_tm2) / (12 * dt**2)
     residual = jnp.abs(acceleration)
     return (residual * weight).flatten()
 
 
+# 同样使用五点二阶差分，返回超过显式 acceleration_limit 的非负量。
 def limit_acceleration_residual(
     vals: VarValues,
     var_t: Var[Array],
@@ -288,11 +311,13 @@ def limit_acceleration_residual(
     q_tp1 = vals[var_t_plus_1]
     q_tp2 = vals[var_t_plus_2]
 
+    # 五点二阶差分除以 dt²；调用方须提供 t±1/t±2 的对齐变量 ID。
     acceleration = (-q_tp2 + 16 * q_tp1 - 30 * q_t + 16 * q_tm1 - q_tm2) / (12 * dt**2)
     residual = jnp.maximum(0.0, jnp.abs(acceleration) - acceleration_limit)
     return (residual * weight).flatten()
 
 
+# 名称保留 five_point，实际用六个邻点的七点模板计算三阶差分 jerk。
 def five_point_jerk_residual(
     vals: VarValues,
     var_t_plus_3: Var[Array],
@@ -312,12 +337,14 @@ def five_point_jerk_residual(
     q_tp2 = vals[var_t_plus_2]
     q_tp3 = vals[var_t_plus_3]
 
+    # 七点三阶差分除以 dt³；函数名保留 five_point，但模板覆盖 t±1/t±2/t±3。
     jerk = (-q_tp3 + 8 * q_tp2 - 13 * q_tp1 + 13 * q_tm1 - 8 * q_tm2 + q_tm3) / (
         8 * dt**3
     )
     return (jnp.abs(jerk) * weight).flatten()
 
 
+# 以七点三阶差分计算 jerk，惩罚超出显式 jerk_limit 的非负部分。
 def limit_jerk_residual(
     vals: VarValues,
     var_t_plus_3: Var[Array],
@@ -343,6 +370,7 @@ def limit_jerk_residual(
     q_tp2 = vals[var_t_plus_2]
     q_tp3 = vals[var_t_plus_3]
 
+    # 七点三阶差分除以 dt³；函数名保留 five_point，但模板覆盖 t±1/t±2/t±3。
     jerk = (-q_tp3 + 8 * q_tp2 - 13 * q_tp1 + 13 * q_tm1 - 8 * q_tm2 + q_tm3) / (
         8 * dt**3
     )

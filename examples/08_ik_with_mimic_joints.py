@@ -7,6 +7,7 @@ We procedurally generate a "zig-zag" chain of links with mimic joints, where:
 - and the remaining joints are driven indirectly via mimic joints.
 The multipliers alternate between -1 and 1, and the offsets are all 0.
 """
+# 学习导读：生成带正/负 multiplier 的 mimic 链 URDF，观察直接驱动自由度如何影响间接驱动关节。
 
 import tempfile
 import time
@@ -20,7 +21,9 @@ from viser.extras import ViserUrdf
 import pyroki_snippets as pks
 
 
+# 以字符串生成带 joint_0 线性 mimic 关系的连杆链，供解析与 FK/IK 示例使用。
 def create_chain_xml(length: float = 0.2, num_chains: int = 5) -> str:
+    # 生成单个带可视圆柱和惯性标签的 link XML；这里不会求动力学。
     def create_link(idx):
         return f"""
                 <link name="link_{idx}">
@@ -36,6 +39,7 @@ def create_chain_xml(length: float = 0.2, num_chains: int = 5) -> str:
                 </link>
             """
 
+    # 生成旋转 joint XML，首关节不写 mimic，其余引用 joint_0 并传 multiplier/offset。
     def create_joint(idx, multiplier=1.0, offset=0.0):
         mimic = f'<mimic joint="joint_0" multiplier="{multiplier}" offset="{offset}"/>'
         return f"""
@@ -81,6 +85,7 @@ def create_chain_xml(length: float = 0.2, num_chains: int = 5) -> str:
     return xml
 
 
+# 把 XML 写临时 URDF 后加载，创建目标连杆选择与拖拽 IK，可观察 mimic 关节联动。
 def main():
     """Main function for basic IK."""
 
@@ -91,9 +96,11 @@ def main():
         urdf = yourdfpy.URDF.load(f.name)
 
     # Create robot.
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -109,6 +116,7 @@ def main():
     )
     timing_handle = server.gui.add_number("Elapsed (ms)", 0.001, disabled=True)
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         # Solve IK.
         start_time = time.time()
@@ -127,5 +135,6 @@ def main():
         urdf_vis.update_cfg(solution)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

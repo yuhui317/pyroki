@@ -8,6 +8,8 @@ Note: This uses a custom Jacobian pattern that doesn't fit the simple
 Cost.create_factory(residual_fn) pattern, so it's kept as a specialized
 cost factory rather than a pure residual function.
 """
+# 学习导读：用单边有限差分近似位姿残差雅可比，与解析路径共享残差/FK 缓存接口。
+# 每列扰动 eps 并重新 FK，适合对照阅读；此文件不是 JAX 自动微分实现。
 
 import jax
 import jax.numpy as jnp
@@ -20,6 +22,7 @@ from .._robot import Robot
 _PoseCostJacCache = tuple[jax.Array, jax.Array, jaxlie.SE3]
 
 
+# 逐关节做单边 eps 扰动，差分 log 位姿误差并堆成加权 6×N_act 雅可比。
 def _pose_cost_jac(
     vals: jaxls.VarValues,
     jac_cache: _PoseCostJacCache,
@@ -35,21 +38,25 @@ def _pose_cost_jac(
     joint_cfg = vals[joint_var]
     _, _, pose_error = jac_cache
 
+    # 仅扰动一个关节并重新 FK，返回该列误差差分；eps 的尺度影响截断误差与数值精度。
     def finite_difference_jac(idx: jax.Array) -> jax.Array:
         joint_cfg_perturbed = joint_cfg.at[idx].add(eps)
         T_world_ee = jaxlie.SE3(
             robot.forward_kinematics(joint_cfg_perturbed)[..., target_link_index, :]
         )
         perturbed_pose_error = target_pose.inverse() @ T_world_ee
+        # 差分的是 SE(3) log 残差而不是原始 7 维四元数/平移向量。
         err_diff = perturbed_pose_error.log() - pose_error.log()
         return err_diff / eps
 
+    # 对 N_act 个扰动并行计算，再转置为 [6,N_act]；输出列顺序与直接驱动关节一致。
     jac = jax.vmap(finite_difference_jac)(jnp.arange(joint_cfg.shape[-1])).T
     assert jac.shape == (6, robot.joints.num_actuated_joints)
 
     return jac * jnp.array([pos_weight] * 3 + [ori_weight] * 3)[:, None]
 
 
+# 生成 log(target⁻¹·actual) 残差和 FK 缓存；eps 只在自定义雅可比回调使用。
 @jaxls.Cost.factory(jac_custom_with_cache_fn=_pose_cost_jac)
 def pose_cost_numerical_jac(
     vals: jaxls.VarValues,

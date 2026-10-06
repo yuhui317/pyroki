@@ -1,0 +1,14 @@
+{
+  "name": "pyroki",
+  "upstream": "chungmin99/pyroki",
+  "fork": "yuhui317/pyroki",
+  "local_path": "projects/pyroki",
+  "source_branch": "main",
+  "study_branch": "codex/study/pyroki-code-analysis",
+  "baseline": "388e43e1fc0d0ee382968d3dd72970fd62a0450c",
+  "checkout_date": "2026-10-06",
+  "annotated_files": 48,
+  "read_files": 50,
+  "original_files": 86,
+  "gitlinks": []
+}

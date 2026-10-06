@@ -1,3 +1,5 @@
+# 学习导读：实现已登记几何对的距离计算，包括几何公式和高度图/胶囊盒等近似。
+# 不是任意 mesh 的精确碰撞检测；同一 signed distance 约定不代表每种类型采用同等精度。
 from __future__ import annotations
 
 import jax.numpy as jnp
@@ -10,6 +12,7 @@ from . import _utils
 # --- HalfSpace Collision Implementations ---
 
 
+# 沿外法线投影球心到平面点的差，再减半径，给出半空间与球距离。
 def _halfspace_sphere_dist(
     halfspace_normal: Float[Array, "*batch 3"],
     halfspace_point: Float[Array, "*batch 3"],
@@ -24,6 +27,7 @@ def _halfspace_sphere_dist(
     return dist
 
 
+# 从几何对象取法线、平面点、球心与半径，转发半空间/球公式。
 def halfspace_sphere(halfspace: HalfSpace, sphere: Sphere) -> Float[Array, "*batch"]:
     """Calculates distance between a halfspace and a sphere."""
     dist = _halfspace_sphere_dist(
@@ -35,6 +39,7 @@ def halfspace_sphere(halfspace: HalfSpace, sphere: Sphere) -> Float[Array, "*bat
     return dist
 
 
+# 计算胶囊两端球相对平面的距离并取较小值，覆盖沿轴线的最小投影。
 def halfspace_capsule(halfspace: HalfSpace, capsule: Capsule) -> Float[Array, "*batch"]:
     """Calculates distance between halfspace and capsule (closest end)."""
     halfspace_normal = halfspace.normal
@@ -56,6 +61,7 @@ def halfspace_capsule(halfspace: HalfSpace, capsule: Capsule) -> Float[Array, "*
 # --- Sphere/Capsule Collision Implementations ---
 
 
+# 求球心距离再减两半径；normalize_with_norm 中 eps 会带来微小数值偏移。
 def _sphere_sphere_dist(
     pos1: Float[Array, "*batch 3"],
     radius1: Float[Array, "*batch"],
@@ -68,6 +74,7 @@ def _sphere_sphere_dist(
     return dist
 
 
+# 提取两个球的中心/半径并计算间距。
 def sphere_sphere(sphere1: Sphere, sphere2: Sphere) -> Float[Array, "*batch"]:
     """Calculate distance between two spheres."""
     dist = _sphere_sphere_dist(
@@ -79,6 +86,7 @@ def sphere_sphere(sphere1: Sphere, sphere2: Sphere) -> Float[Array, "*batch"]:
     return dist
 
 
+# 先求球心到胶囊轴线段最近点，再减球/胶囊半径。
 def sphere_capsule(sphere: Sphere, capsule: Capsule) -> Float[Array, "*batch"]:
     """Calculate distance between sphere and capsule."""
     cap_pos = capsule.pose.translation()
@@ -92,6 +100,7 @@ def sphere_capsule(sphere: Sphere, capsule: Capsule) -> Float[Array, "*batch"]:
     return dist
 
 
+# 求两轴线段最近点，再扣掉两胶囊半径得到表面距离。
 def capsule_capsule(capsule1: Capsule, capsule2: Capsule) -> Float[Array, "*batch"]:
     """Calculate distance between two capsules."""
     pos1 = capsule1.pose.translation()
@@ -118,6 +127,7 @@ def capsule_capsule(capsule1: Capsule, capsule2: Capsule) -> Float[Array, "*batc
 # --- Heightmap Collision Implementations ---
 
 
+# 以球心正下方插值高度求局部 z 差减半径，是垂直距离近似而非曲面欧氏 signed distance。
 def heightmap_sphere(heightmap: Heightmap, sphere: Sphere) -> Float[Array, "*batch"]:
     """Calculate approximate distance between heightmap and sphere.
 
@@ -133,12 +143,14 @@ def heightmap_sphere(heightmap: Heightmap, sphere: Sphere) -> Float[Array, "*bat
     interpolated_local_z = heightmap._interpolate_height_at_coords(sphere_pos_w)
     sphere_pos_h = heightmap.pose.inverse().apply(sphere_pos_w)
     sphere_local_z = sphere_pos_h[..., 2]
+    # 这是高度图局部 z 方向距离；地形斜率大时与表面最短欧氏距离不同。
     dist = sphere_local_z - interpolated_local_z - sphere_radius
 
     assert dist.shape == batch_axes
     return dist
 
 
+# 只检查胶囊两端球相对高度图的垂直距离，可能遗漏中段与地形相交。
 def heightmap_capsule(heightmap: Heightmap, capsule: Capsule) -> Float[Array, "*batch"]:
     """Calculate approximate distance between heightmap and capsule, by
     checking heightmap points below capsule endpoints.
@@ -173,11 +185,13 @@ def heightmap_capsule(heightmap: Heightmap, capsule: Capsule) -> Float[Array, "*
     dist2 = z2_local - h_surf2_local - cap_radius
 
     # Return the minimum distance.
+    # 只取两端结果的最小值，不能捕捉中段越过地形隆起而端点仍在上方的情况。
     min_dist = jnp.minimum(dist1, dist2)
     assert min_dist.shape == batch_axes
     return min_dist
 
 
+# 对高度图所有离散顶点计算平面 signed distance，取顶点最小值作为近似。
 def heightmap_halfspace(
     heightmap: Heightmap, halfspace: HalfSpace
 ) -> Float[Array, "*batch"]:
@@ -221,6 +235,7 @@ def heightmap_halfspace(
 # --- Box Collision Implementations ---
 
 
+# 取盒八个角点对平面的最小有向距离，确定最靠近/穿入半空间的角点。
 def halfspace_box(halfspace: HalfSpace, box: Box) -> Float[Array, "*batch"]:
     """Calculate distance between a halfspace and a box.
 
@@ -252,6 +267,7 @@ def halfspace_box(halfspace: HalfSpace, box: Box) -> Float[Array, "*batch"]:
     return min_dist
 
 
+# 球心转盒局部并裁到边界范围，最近点差减半径；球心在内部时未加入最近面的穿透深度。
 def _sphere_box_dist(
     sphere_pos: Float[Array, "*batch 3"],
     sphere_radius: Float[Array, "*batch"],
@@ -263,6 +279,7 @@ def _sphere_box_dist(
 
     # Clamp to box bounds to find closest point on box surface
     half_ext = box.half_extent
+    # 球心在盒内部时裁剪点就是球心，导致此球盒分支没有内部最近面深度。
     closest = jnp.clip(local_center, -half_ext, half_ext)
 
     # Distance from sphere center to closest point, minus radius
@@ -273,6 +290,7 @@ def _sphere_box_dist(
     return dist
 
 
+# 从球体取中心/半径，转发当前球盒距离实现。
 def sphere_box(sphere: Sphere, box: Box) -> Float[Array, "*batch"]:
     """Calculate distance between a sphere and a box."""
     return _sphere_box_dist(
@@ -282,6 +300,7 @@ def sphere_box(sphere: Sphere, box: Box) -> Float[Array, "*batch"]:
     )
 
 
+# 点到轴对齐盒的 signed distance，内部返回负最近面距离，外部返回正最近点距离。
 def _point_to_box_sdf(
     point: Float[Array, "*batch 3"],
     half_ext: Float[Array, "*batch 3"],
@@ -299,10 +318,12 @@ def _point_to_box_sdf(
     min_face_dist = jnp.min(face_dists, axis=-1)
 
     # If inside (dist ~= 0), return negative penetration; otherwise return positive dist
+    # 点盒 SDF 分支用阈值判断内部并返回负最近面距离，与上面球盒 helper 的内部处理不同。
     is_inside = dist < 1e-5
     return jnp.where(is_inside, -min_face_dist, dist)
 
 
+# 在盒局部对胶囊轴线做两次最近点细化，再计算盒 SDF 减半径；属于当前实现的迭代近似。
 def capsule_box(capsule: Capsule, box: Box) -> Float[Array, "*batch"]:
     """Calculate signed distance between a capsule and a box.
 
@@ -329,6 +350,7 @@ def capsule_box(capsule: Capsule, box: Box) -> Float[Array, "*batch"]:
     pt_box = jnp.clip(pt_seg, -half_ext, half_ext)
 
     # Iteration 2: refine with closest point on segment to pt_box
+    # 只有这一次细化，不是循环至最近点收敛；保持为近似碰撞实现解读。
     pt_seg = _utils.closest_segment_point(p1_local, p2_local, pt_box)
 
     # Compute signed distance from segment point to box

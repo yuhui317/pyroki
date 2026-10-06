@@ -2,6 +2,8 @@
 
 Simplest Inverse Kinematics Example using PyRoki.
 """
+# 学习导读：首个学习入口，加载 Panda URDF→构造 Robot→拖动末端目标→调用 solve_ik→更新 Viser。
+# 浏览器可视化只显示求得的关节配置，不向真实机器人发送命令。
 
 import time
 
@@ -14,6 +16,7 @@ from viser.extras import ViserUrdf
 import pyroki_snippets as pks
 
 
+# 加载 Panda 模型、创建目标控制器，在循环中调用基本 IK 并更新 URDF 可视姿态。
 def main():
     """Main function for basic IK."""
 
@@ -27,9 +30,11 @@ def main():
     target_link_name = "panda_hand"
 
     # Create robot.
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -40,6 +45,7 @@ def main():
     )
     timing_handle = server.gui.add_number("Elapsed (ms)", 0.001, disabled=True)
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         # Solve IK.
         start_time = time.time()
@@ -58,5 +64,6 @@ def main():
         urdf_vis.update_cfg(solution)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

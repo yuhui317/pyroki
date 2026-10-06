@@ -7,6 +7,8 @@ modified pseudo-inverse that handles singular configurations smoothly.
 
 Reference: https://github.com/armlabstanford/jparse
 """
+# 学习导读：J-PARSE 速度 IK 独立于 jaxls 非线性最小二乘；FK 自动微分→雅可比伪逆→速度→积分→限位。
+# SVD 分解区分近奇异方向，并提供 pinv/DLS 对照；读者需核对零奇异值与 gamma 等参数边界。
 
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import pyroki as pk
 from jax.typing import ArrayLike
 
 
+# 通过 FK 自动微分构造世界坐标平移 Jacobian，可选择追加当前姿态锚定的几何角速度 Jacobian。
 def compute_jacobian(
     robot: pk.Robot,
     cfg: ArrayLike,
@@ -53,6 +56,7 @@ def compute_jacobian(
         anchor_poses = robot.forward_kinematics(cfg)
         R_anchor_inv = jaxlie.SE3(anchor_poses[target_link_index]).rotation().inverse()
 
+        # 固定当前姿态的逆旋转为锚点，求平移与相对旋转 log，避免把锚点也当作 q 的函数求导。
         def get_pose_components(q: jax.Array) -> jnp.ndarray:
             poses = robot.forward_kinematics(q)
             pose = jaxlie.SE3(poses[target_link_index])
@@ -64,6 +68,7 @@ def compute_jacobian(
     return jacobian
 
 
+# SVD 重建安全/投影 Jacobian，加奇异方向反馈，返回 [N_act,M] 伪逆及 [N_act,N_act] 零空间矩阵。
 def jparse_pseudoinverse(
     jacobian: ArrayLike,
     gamma: float = 0.1,
@@ -125,6 +130,7 @@ def jparse_pseudoinverse(
         pos_dims = position_dimensions
         ang_dims = angular_dimensions
 
+    # S 长度为 min(M,N)，阈值 gamma·sigma_max 定义近奇异方向。
     U, S, Vt = jnp.linalg.svd(J, full_matrices=True)
     k = S.shape[0]  # min(m, n)
 
@@ -153,6 +159,7 @@ def jparse_pseudoinverse(
 
     # Singular direction feedback: Phi = sum_i phi_i * u_i @ u_i^T @ Kp
     # where phi_i = sigma_i / (sigma_max * gamma) for singular directions.
+    # 这里分母 sigma_max·gamma 未做零保护，全零 Jacobian/gamma=0 时需要独立数值核对。
     phi = jnp.where(non_singular, 0.0, S / (sigma_max * gamma))
     # Phi_singular = U_k @ diag(phi) @ U_k^T @ Kp
     singular_gains = jnp.concatenate(
@@ -172,11 +179,13 @@ def jparse_pseudoinverse(
     return J_parse, nullspace
 
 
+# 标准 Moore–Penrose 伪逆，用于对照 J-PARSE 行为。
 def pinv(jacobian: ArrayLike) -> jnp.ndarray:
     """Standard Moore-Penrose pseudo-inverse (for comparison)."""
     return jnp.linalg.pinv(jnp.asarray(jacobian))
 
 
+# 计算 (JᵀJ+λ²I)⁻¹Jᵀ 的阻尼伪逆，以阻尼抑制近奇异方向更新。
 def damped_least_squares(
     jacobian: ArrayLike,
     damping: float = 0.05,
@@ -195,12 +204,14 @@ def damped_least_squares(
     return jnp.linalg.inv(J.T @ J + damping**2 * jnp.eye(n)) @ J.T
 
 
+# 计算 sqrt(det(JJᵀ))；这里没有像核心库一样用 max(0,det) 保护负数舍入误差。
 def manipulability_measure(jacobian: ArrayLike) -> jnp.ndarray:
     """Yoshikawa's manipulability measure: sqrt(det(J @ J^T))."""
     J = jnp.asarray(jacobian)
     return jnp.sqrt(jnp.linalg.det(J @ J.T))
 
 
+# 取最小/最大奇异值之比；全零 Jacobian 的零除边界没有额外处理。
 def inverse_condition_number(jacobian: ArrayLike) -> jnp.ndarray:
     """Inverse condition number: sigma_min / sigma_max."""
     J = jnp.asarray(jacobian)
@@ -208,6 +219,7 @@ def inverse_condition_number(jacobian: ArrayLike) -> jnp.ndarray:
     return jnp.min(S) / jnp.max(S)
 
 
+# 从目标位置/可选姿态得到任务速度，经伪逆与回 home 的零空间项，再限速、Euler 积分和裁关节范围。
 def jparse_step(
     robot: pk.Robot,
     cfg: ArrayLike,
@@ -279,6 +291,7 @@ def jparse_step(
     else:
         assert target_wxyz is not None
         tw = jnp.asarray(target_wxyz)
+        # 姿态四元数按 wxyz 输入并归一化；零四元数的除零情况没有单独处理。
         tw = tw / jnp.linalg.norm(tw)
 
         current_wxyz = target_pose.rotation().wxyz
@@ -331,6 +344,7 @@ def jparse_step(
         N = jnp.eye(jacobian.shape[1]) - J_inv @ jacobian
 
     # Primary task joint velocities.
+    # 任务空间速度经伪逆映射到关节速度，再叠加指向 home 的零空间动作。
     dq = J_inv @ v_des
 
     # Nullspace motion toward home configuration.
@@ -356,11 +370,13 @@ def jparse_step(
     dq = dq * scale
 
     # Integrate.
+    # 显式 Euler 单步积分，与轨迹最小二乘同时优化多个时间点是不同算法。
     new_cfg = cfg + dq * dt
 
     # Clamp to joint limits.
     lower = robot.joints.lower_limits
     upper = robot.joints.upper_limits
+    # 积分后按直接驱动关节位置限位裁剪；没有在该步骤检查碰撞或机器人动力学。
     new_cfg = jnp.clip(new_cfg, lower, upper)
 
     info = {

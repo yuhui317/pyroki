@@ -4,6 +4,8 @@ Demonstrates joint locking during IK optimization by zeroing out Jacobian column
 for locked joints. Uses checkboxes to dynamically lock/unlock individual joints
 without triggering JAX recompilation.
 """
+# 学习导读：通过解析位姿雅可比的列掩码锁定关节，以上轮解初始化，并在输出端恢复已锁关节。
+# 切换掩码值而不改变形状可复用编译图；这是示例策略，不是通用固定变量约束 API。
 
 import time
 
@@ -19,6 +21,7 @@ from robot_descriptions.loaders.yourdfpy import load_robot_description
 from viser.extras import ViserUrdf
 
 
+# 用 joint_mask 屏蔽位姿雅可比列，以 prev_cfg 初始化，再按解析位姿代价/限位约束求解。
 @jdc.jit
 def _solve_ik(
     robot: pk.Robot,
@@ -47,6 +50,7 @@ def _solve_ik(
         jaxlie.SO3(target_wxyz), target_position
     )
 
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_analytic_jac(
             robot,
@@ -55,6 +59,7 @@ def _solve_ik(
             target_link_index,
             pos_weight=50.0,
             ori_weight=10.0,
+            # 这里仅作用于解析位姿因子；下方仍有未加 mask 的 limit_constraint。
             joint_mask=joint_mask,
         ),
         pk.costs.limit_constraint(
@@ -76,6 +81,7 @@ def _solve_ik(
     return sol[joint_var]
 
 
+# 返回 log(actual⁻¹·target) 的平移部分范数；存在旋转差时它不是直接 xyz 相减的欧氏距离。
 @jdc.jit
 def _compute_pose_error(
     robot: pk.Robot,
@@ -102,6 +108,7 @@ def _compute_pose_error(
     return pos_error
 
 
+# 把复选框映射为固定形状关节掩码，显示解并在最后恢复锁定关节旧值。
 def main():
     """Main function for IK with locked joints."""
 
@@ -109,9 +116,11 @@ def main():
     target_link_name = "panda_hand"
 
     # Create robot.
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -137,6 +146,7 @@ def main():
                 cb = server.gui.add_checkbox(f"{name}", initial_value=True)
                 joint_checkboxes.append(cb)
 
+        # 按钮回调切换全部关节勾选状态，Reset 用可变列表通知主循环重置初值。
         @lock_all_btn.on_click
         def _(_):
             for cb in joint_checkboxes:
@@ -162,6 +172,7 @@ def main():
     default_cfg = np.array(robot.joint_var_cls(0).default_factory())
     prev_cfg = default_cfg.copy()
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         # Handle reset request.
         if reset_requested[0]:
@@ -185,6 +196,7 @@ def main():
             target_link_index=target_link_idx_jax,
             target_wxyz=target_wxyz_jax,
             target_position=target_position_jax,
+            # 这里仅作用于解析位姿因子；下方仍有未加 mask 的 limit_constraint。
             joint_mask=joint_mask_jax,
             prev_cfg=prev_cfg_jax,
         )
@@ -202,6 +214,7 @@ def main():
             target_position=target_position_jax,
         )
         pos_error_handle.value = (
+            # 原 GUI 标签写 m，但此更新乘 1000；这里只记录实现，未改显示单位。
             0.99 * pos_error_handle.value + 0.01 * float(pos_err) * 1000
         )
 
@@ -210,6 +223,7 @@ def main():
         solution_np = np.array(solution)
         for i, cb in enumerate(joint_checkboxes):
             if not cb.value:  # Joint is locked
+                # 输出端再次恢复已锁关节，避免其他代价导致锁定列仍发生配置改变。
                 solution_np[i] = prev_cfg[i]
 
         # Update previous config for next iteration.
@@ -219,5 +233,6 @@ def main():
         urdf_vis.update_cfg(solution_np)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

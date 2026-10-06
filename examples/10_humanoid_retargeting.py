@@ -2,6 +2,8 @@
 
 Simpler motion retargeting to the G1 humanoid.
 """
+# 学习导读：将 SMPL 关键点序列重定向到 G1，结合局部相对向量/角度匹配、全局关键点与关节偏好。
+# 简版加载脚接触与高度图用于数据准备/显示，求解函数未加入接触或世界碰撞因子。
 
 import time
 from pathlib import Path
@@ -25,6 +27,7 @@ from retarget_helpers._utils import (
 )
 
 
+# 声明重定向残差的各项权重，字段用于 GUI 调节与传入 JIT 求解函数。
 class RetargetingWeights(TypedDict):
     local_alignment: float
     """Local alignment weight, by matching the relative joint/keypoint positions and angles."""
@@ -32,10 +35,12 @@ class RetargetingWeights(TypedDict):
     """Global alignment weight, by matching the keypoint positions to the robot."""
 
 
+# 读取指定人体关键点与机器人模型，准备映射/权重，求整段轨迹并在 Viser 中逐帧播放。
 def main():
     """Main function for humanoid retargeting."""
 
     urdf = load_robot_description("g1_description")
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Load source motion data:
@@ -74,6 +79,7 @@ def main():
     )
     smpl_mask = create_conn_tree(robot, g1_joint_retarget_indices)
 
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     base_frame = server.scene.add_frame("/base", show_axes=False)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -91,6 +97,7 @@ def main():
 
     Ts_world_root, joints = None, None
 
+    # 按钮回调重算整段根位姿和关节轨迹，更新外层状态并在计算期间禁用按钮。
     def generate_trajectory():
         nonlocal Ts_world_root, joints
         gen_button.disabled = True
@@ -110,6 +117,7 @@ def main():
     generate_trajectory()
     assert Ts_world_root is not None and joints is not None
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         with server.atomic():
             if playing.value:
@@ -128,6 +136,7 @@ def main():
         time.sleep(0.05)
 
 
+# 建立每帧关节/根位姿变量和跨帧共享尺度，组合局部/全局对齐与相关平滑因子后求解。
 @jdc.jit
 def solve_retargeting(
     robot: pk.Robot,
@@ -152,20 +161,25 @@ def solve_retargeting(
     )
 
     # Variables.
+    # 以 N_retarget×N_retarget 尺度矩阵调整机器人局部向量；重复 ID=0 意味着全序列共享一份值。
     class SmplJointsScaleVarG1(
         jaxls.Var[jax.Array], default_factory=lambda: jnp.ones((n_retarget, n_retarget))
     ): ...
 
+    # 3 维平移偏移变量，最终左乘根位姿；简版/手部版本未在因子中使用它，不能据声明推断已优化其值。
     class OffsetVar(jaxls.Var[jax.Array], default_factory=lambda: jnp.zeros((3,))): ...
 
+    # 每个时间步一个关节变量 ID，输出轨迹配置末轴为 N_act；根位姿同样按时间 ID 建立。
     var_joints = robot.joint_var_cls(jnp.arange(timesteps))
     var_Ts_world_root = jaxls.SE3Var(jnp.arange(timesteps))
+    # 所有时间行的尺度变量 ID 都是 0，因此共享同一个 N_retarget×N_retarget 矩阵。
     var_smpl_joints_scale = SmplJointsScaleVarG1(jnp.zeros(timesteps))
     var_offset = OffsetVar(jnp.zeros(timesteps))
 
     # Costs and constraints.
     costs: list[jaxls.Cost] = []
 
+    # 比较映射关键点的成对相对向量与夹角，以连接掩码排除非对应连接/对角线。
     @jaxls.Cost.factory
     def retargeting_cost(
         var_values: jaxls.VarValues,
@@ -188,9 +202,11 @@ def solve_retargeting(
 
         # NxN grid of relative positions.
         delta_smpl = smpl_pos[:, None] - smpl_pos[None, :]
+        # 两两位置相减形成 [N_retarget,N_retarget,3]；对角线为零，后续显式掩掉。
         delta_robot = robot_pos[:, None] - robot_pos[None, :]
 
         # Vector regularization.
+        # 把二维尺度矩阵扩成 [N,N,1]，广播到相对位置差 [N,N,3] 的 xyz。
         position_scale = var_values[var_smpl_joints_scale][..., None]
         residual_position_delta = (
             (delta_smpl - delta_robot * position_scale)
@@ -205,6 +221,7 @@ def solve_retargeting(
         delta_robot_normalized = delta_robot / jnp.linalg.norm(
             delta_robot + 1e-6, axis=-1, keepdims=True
         )
+        # 归一化相对向量点积是夹角 cos，这里惩罚 1−cos，而不是直接 arccos 角度。
         residual_angle_delta = 1 - (delta_smpl_normalized * delta_robot_normalized).sum(
             axis=-1
         )
@@ -222,6 +239,7 @@ def solve_retargeting(
         )
         return residual
 
+    # 把 FK 连杆乘世界根位姿后，与人体对应关键点进行世界坐标位置软对齐。
     @jaxls.Cost.factory
     def pc_alignment_cost(
         var_values: jaxls.VarValues,
@@ -238,6 +256,7 @@ def solve_retargeting(
         keypoint_pos = keypoints[smpl_joint_retarget_indices]
         return (link_pos - keypoint_pos).flatten() * weights["global_alignment"]
 
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         # Costs that are relatively self-contained to the robot.
         retargeting_cost(
@@ -273,6 +292,7 @@ def solve_retargeting(
         ),
     )
 
+    # 统一交给 LeastSquaresProblem 分析并求解，数值收敛和设备执行均不由本次注释任务验证。
     solution = (
         jaxls.LeastSquaresProblem(
             costs=costs,
@@ -287,10 +307,12 @@ def solve_retargeting(
         .solve()
     )
     transform = solution[var_Ts_world_root]
+    # 最后把 offset 左乘到根位姿；该变量是否参与优化要检查当前版本具体因子列表。
     offset = solution[var_offset]
     transform = jaxlie.SE3.from_translation(offset) @ transform
     return transform, solution[var_joints]
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

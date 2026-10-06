@@ -1,4 +1,6 @@
 """Tests for vmapping inverse kinematics solvers (and collision batching)."""
+# 学习导读：验证 JAX vmap 对共享/批量机器人和碰撞体的适配；多数断言检查形状/拓扑兼容而非 IK 精度。
+# 测试加载 robot_descriptions 的模型，本次注释任务不执行这些数值/模型加载测试。
 
 import jax
 import jax.numpy as jnp
@@ -14,6 +16,7 @@ from robot_descriptions.loaders.yourdfpy import load_robot_description
 # -------------------------------------------------------------------
 
 
+# 测试用单目标基本 IK，添加 rest 和关节约束，供不同 vmap 方式调用。
 @jdc.jit
 def _solve_ik(
     robot: pk.Robot,
@@ -26,6 +29,7 @@ def _solve_ik(
     target_pose = jaxlie.SE3.from_rotation_and_translation(
         jaxlie.SO3(target_wxyz), target_position
     )
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_analytic_jac(
             robot, joint_var, target_pose, target_link_index, 50.0, 10.0
@@ -45,6 +49,7 @@ def _solve_ik(
     return sol[joint_var]
 
 
+# 测试用带自碰撞软代价的 IK，检查 RobotCollision 是否能共享或按批映射。
 @jdc.jit
 def _solve_ik_coll(
     robot: pk.Robot,
@@ -54,6 +59,7 @@ def _solve_ik_coll(
 ) -> jax.Array:
     """Collision-aware IK solver."""
     joint_var = robot.joint_var_cls(0)
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost(robot, joint_var, target_pose, target_link_index, 5.0, 1.0),
         pk.costs.rest_cost(joint_var, jnp.array(joint_var.default_factory()), 0.01),
@@ -76,6 +82,7 @@ def _solve_ik_coll(
 # -------------------------------------------------------------------
 
 
+# 构造小型胶囊碰撞对象，批化数值叶节点后检查静态活动索引仍可使用。
 def test_unit_collision_batching():
     """Unit test: RobotCollision manual batching without full URDF."""
     # 1. Create a dummy collision object (single batch)
@@ -92,6 +99,7 @@ def test_unit_collision_batching():
     # 2. Manually broadcast to batch size 5 with variation
     batch_size = 5
 
+    # 把数值叶节点堆出 5 批并添加差异，用于检查映射没有丢失批间变化。
     def broadcast_vary(leaf):
         # Broadcast (1, ...) -> (5, ...) and add variation
         return jnp.stack([leaf + i * 0.01 for i in range(batch_size)])
@@ -99,6 +107,7 @@ def test_unit_collision_batching():
     batched_coll = jax.tree.map(broadcast_vary, robot_coll)
 
     # 3. Vmap a function over it
+    # 读取静态碰撞对索引并返回两几何体半径之和，验证 PyTree/vmap 形状。
     @jax.jit
     def compute(rc: RobotCollision):
         idx_i, idx_j = jnp.array(rc.active_idx_i), jnp.array(rc.active_idx_j)
@@ -110,6 +119,7 @@ def test_unit_collision_batching():
     assert jnp.all(results[1:] > results[:-1])  # Verify variation was preserved
 
 
+# 断言静态活动碰撞对不同的对象不能直接 tree.map 堆叠，强调批内拓扑必须一致。
 def test_unit_collision_batching_topology_mismatch():
     """
     Unit test: Emphasize that RobotCollision can be batched IF AND ONLY IF
@@ -151,9 +161,11 @@ def test_unit_collision_batching_topology_mismatch():
     )
 
 
+# 共享 Robot/目标索引，把位置姿态沿第 0 轴 vmap，检查 [B,N_act] 输出。
 def test_integration_ik_basic():
     """Integration: Standard usage (Shared Robot, Batched Targets)."""
     urdf = load_robot_description("panda_description")
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
     target_idx = robot.links.names.index("panda_hand")
 
@@ -167,9 +179,11 @@ def test_integration_ik_basic():
     assert res.shape == (batch_size, robot.joints.num_actuated_joints)
 
 
+# 共享机器人但按批传碰撞对象和目标位姿，检查组合映射的输出形状。
 def test_integration_ik_mixed_batching():
     """Integration: Mixed usage (Shared Robot, Batched Collision, Batched Targets)."""
     urdf = load_robot_description("panda_description")
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
     # Ignore adjacents to ensure collision object is non-trivial but clean
     robot_coll = RobotCollision.from_urdf(urdf, ignore_immediate_adjacents=True)
@@ -197,9 +211,11 @@ def test_integration_ik_mixed_batching():
     assert res.shape == (batch_size, robot.joints.num_actuated_joints)
 
 
+# 机器人/碰撞/目标全部显式批化，使用默认 in_axes=0 检查形状一致性。
 def test_integration_ik_fully_batched():
     """Integration: Fully batched (Robot, Collision, Targets all batched)."""
     urdf = load_robot_description("panda_description")
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
     robot_coll = RobotCollision.from_urdf(urdf, ignore_immediate_adjacents=True)
     target_idx = robot.links.names.index("panda_hand")
@@ -233,6 +249,7 @@ def test_integration_ik_fully_batched():
     assert res.shape == (batch_size, robot.joints.num_actuated_joints)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     test_unit_collision_batching()
     test_integration_ik_basic()

@@ -1,4 +1,6 @@
 """Collision detection primitives and utilities."""
+# 学习导读：公开碰撞几何、RobotCollision、距离派发及激活函数，供 costs 和示例调用。
+# 几何近似与视觉网格不同，距离含义/支持类型组合应以具体实现为准。
 
 from ._collision import colldist_from_sdf as colldist_from_sdf
 from ._collision import collide as collide

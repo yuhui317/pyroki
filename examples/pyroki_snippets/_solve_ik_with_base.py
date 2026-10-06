@@ -1,3 +1,5 @@
+# 学习导读：同时优化关节配置与可动基座 SE(3)，通过自定义 retract 屏蔽基座指定切空间轴。
+# 权重按 Fetch 机器人设置，复用到其他机器人时需重新核对关节顺序与尺度。
 import jax
 import jax.numpy as jnp
 import jax_dataclasses as jdc
@@ -7,6 +9,7 @@ import numpy as onp
 import pyroki as pk
 
 
+# 包装世界目标、固定基座轴和上一轮状态，返回 NumPy 基座 xyz/wxyz 与直接驱动配置。
 def solve_ik_with_base(
     robot: pk.Robot,
     target_link_name: str,
@@ -62,6 +65,7 @@ def solve_ik_with_base(
     return onp.array(base_pos), onp.array(base_wxyz), onp.array(cfg)
 
 
+# 同时声明关节与自定义 SE3 变量，加入世界位姿/上一状态偏好并以上轮配置初始化。
 @jdc.jit
 def _solve_ik_jax(
     robot: pk.Robot,
@@ -74,11 +78,14 @@ def _solve_ik_jax(
 ) -> tuple[jaxlie.SE3, jax.Array]:
     joint_var = robot.joint_var_cls(0)
 
+    # 在 SE(3) retract 前把固定切空间维度 delta 置零，保留其它方向的流形更新。
     def retract_fn(transform: jaxlie.SE3, delta: jax.Array) -> jaxlie.SE3:
         """Same as jaxls.SE3Var.retract_fn, but removing updates on certain axes."""
+        # fix_base 的 6 维顺序按平移 xyz、旋转切向量 xyz，True 的更新维被置零。
         delta = delta * (1 - fix_base)
         return jaxls.SE3Var.retract_fn(transform, delta)
 
+    # 捕获上轮基座作为默认值和自定义 retract；切空间宽度仍为 6。
     class ConstrainedSE3Var(
         jaxls.Var[jaxlie.SE3],
         default_factory=lambda: jaxlie.SE3.from_rotation_and_translation(
@@ -92,6 +99,7 @@ def _solve_ik_jax(
     base_var = ConstrainedSE3Var(0)
 
     variables = [joint_var, base_var]
+    # 明确列出目标/偏好/约束因子；不同示例使用的软硬条件并不相同，应逐项核对。
     costs = [
         pk.costs.pose_cost_with_base(
             robot,
@@ -107,6 +115,7 @@ def _solve_ik_jax(
             base_var,
             jnp.array(prev_cfg),
             jnp.array(
+                # 这一权重向量假设 Fetch torso_lift 在索引 2，不能无修改套到其它机器人顺序。
                 [0.1] * 2
                 + [2.0]  # fetch torso_lift is at index 2; regularize it like base DoF.
                 + [0.1] * (robot.joints.num_actuated_joints - 3)

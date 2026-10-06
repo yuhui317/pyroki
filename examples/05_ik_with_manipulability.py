@@ -2,6 +2,7 @@
 
 Inverse Kinematics with Manipulability using PyRoKi.
 """
+# 学习导读：调节平移 Yoshikawa 可操作度代价，比较同一目标下关节解与可操作椭球变化。
 
 import time
 import viser
@@ -13,6 +14,7 @@ from viser.extras import ViserUrdf
 import pyroki_snippets as pks
 
 
+# 读取可操作度滑块权重，求 IK 后更新 Yoshikawa 数值和椭球显示。
 def main():
     """Main function for basic IK."""
 
@@ -20,9 +22,11 @@ def main():
     target_link_name = "panda_hand"
 
     # Create robot.
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -43,6 +47,7 @@ def main():
         target_link_name=target_link_name,
     )
 
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         # Solve IK.
         start_time = time.time()
@@ -65,5 +70,6 @@ def main():
         urdf_vis.update_cfg(solution)
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()

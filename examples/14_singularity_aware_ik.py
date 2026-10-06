@@ -2,6 +2,7 @@
 
 Singularity-aware velocity IK using J-PARSE with manipulability visualization.
 """
+# 学习导读：以 J-PARSE 做单步速度 IK，显示可操作度并尝试约 50 Hz 更新；不调用 jaxls。
 
 import time
 
@@ -14,11 +15,13 @@ from viser.extras import ViserUrdf
 from pyroki_snippets._jparse import jparse_step
 
 
+# 每轮做一次 J-PARSE 速度更新，显示指标并补睡眠尝试维持 0.02 秒周期。
 def main():
     urdf = load_robot_description("panda_description")
     target_link_name = "panda_hand"
 
     # Create robot.
+    # URDF 加载在宿主侧完成，Robot.from_urdf 把运动学参数转成可微 JAX 数据结构。
     robot = pk.Robot.from_urdf(urdf)
     target_link_index = robot.links.names.index(target_link_name)
 
@@ -26,6 +29,7 @@ def main():
     cfg = np.array((robot.joints.lower_limits + robot.joints.upper_limits) / 2.0)
 
     # Set up visualizer.
+    # 启动交互可视服务；scene/GUI 负责观察与目标输入，不是物理控制器。
     server = viser.ViserServer()
     server.scene.add_grid("/ground", width=2, height=2)
     urdf_vis = ViserUrdf(server, urdf, root_node_name="/base")
@@ -54,6 +58,7 @@ def main():
     )
 
     # Control loop at ~50Hz.
+    # 持续交互/播放循环，本次静态注释检查不会执行或启动它。
     while True:
         start_time = time.time()
 
@@ -80,5 +85,6 @@ def main():
         time.sleep(max(0.0, 0.02 - elapsed))
 
 
+# 只在直接运行脚本时进入主函数/命令行流程，模块导入通常不会运行此入口。
 if __name__ == "__main__":
     main()
